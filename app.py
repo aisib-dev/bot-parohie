@@ -26,6 +26,29 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 # Articolul generat în așteptare (un singur articol pending la un moment dat)
 pending_articol = {}
 
+def parse_json_robust(text):
+    """Parsează JSON din răspunsul Claude, chiar dacă are text în jur."""
+    # Încearcă direct
+    try:
+        return json.loads(text)
+    except:
+        pass
+    # Caută bloc JSON între ```json ... ```
+    match = re.search(r'```json\s*([\s\S]*?)\s*```', text)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except:
+            pass
+    # Caută primul { ... } din text
+    match = re.search(r'\{[\s\S]*\}', text)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except:
+            pass
+    raise ValueError(f"Nu am putut parsa JSON din răspuns: {text[:200]}")
+
 # ════════════════════════════════════════════════════════════
 #  HELPERS DATĂ ȘI CALENDAR
 # ════════════════════════════════════════════════════════════
@@ -346,7 +369,7 @@ Returnează JSON:
   "tags": ["evanghelie", "calendar-ortodox", "citat-biblic"]
 }}"""
     response = call_claude(SYSTEM_BASE, user, 3000)
-    return json.loads(response)
+    return parse_json_robust(response)
 
 def genereaza_articol_duminica(zi, sfinti, include_ips=False, extra_text=""):
     """Duminică: Evanghelie + Predică stil Lumina + Sfinți + eventual IPS Laurențiu"""
@@ -368,7 +391,7 @@ Returnează JSON:
   "tags": ["duminica", "evanghelie", "predica", "calendar-ortodox"]
 }}"""
     response = call_claude(SYSTEM_BASE, user, 4000)
-    return json.loads(response)
+    return parse_json_robust(response)
 
 def genereaza_articol_sarbatoare(zi, nume_sarbatoare, extra_text=""):
     """Sărbătoare mare: articol festiv + mesaj Facebook stil Patriarhie"""
@@ -387,7 +410,7 @@ Returnează JSON:
   "tags": ["sarbatoare", "calendar-ortodox"]
 }}"""
     response = call_claude(SYSTEM_BASE, user, 3000)
-    data = json.loads(response)
+    data = parse_json_robust(response)
     data['imagine_url'] = imagine_url
     return data
 
@@ -404,7 +427,7 @@ Returnează JSON:
   "tags": ["post", "viata-duhovniceasca"]
 }}"""
     response = call_claude(SYSTEM_BASE, user, 2500)
-    return json.loads(response)
+    return parse_json_robust(response)
 
 def genereaza_articol_saptamana_mare(zi, titlu_zi, tema_zi):
     """Săptămâna Mare: articol zilnic Luni Mare - Sâmbătă Mare"""
@@ -420,7 +443,7 @@ Returnează JSON:
   "tags": ["saptamana-mare", "patimi", "calendar-ortodox"]
 }}"""
     response = call_claude(SYSTEM_BASE, user, 3500)
-    return json.loads(response)
+    return parse_json_robust(response)
 
 def genereaza_din_poza(imagine_b64, text_preot=""):
     """Generează articol din poza trimisă de preot"""
@@ -438,7 +461,7 @@ Returnează JSON:
   "tags": ["viata-parohiei", "foto"]
 }}"""
     response = call_claude(SYSTEM_BASE, user, 2500, imagine_b64=imagine_b64)
-    return json.loads(response)
+    return parse_json_robust(response)
 
 def genereaza_din_text_preot(text):
     """Generează articol din textul trimis de preot"""
@@ -454,7 +477,7 @@ Returnează JSON:
   "tags": ["viata-parohiei", "anunturi"]
 }}"""
     response = call_claude(SYSTEM_BASE, user, 2000)
-    return json.loads(response)
+    return parse_json_robust(response)
 
 # ════════════════════════════════════════════════════════════
 #  FLUX PRINCIPAL — GENERARE ZILNICĂ
@@ -527,7 +550,7 @@ Returnează JSON:
   "fb_text": "postare Facebook scurtă 100-150 cuvinte despre post cu emoji și hashtag-uri",
   "tags": ["post", "meditatie", "viata-duhovniceasca"]}}"""
             response = call_claude(SYSTEM_BASE, user, 2000)
-            data = json.loads(response)
+            data = parse_json_robust(response)
             data['tip'] = 'post'
             data['publica_wp'] = False  # Zilele de post obișnuite — doar Facebook
 
