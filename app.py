@@ -240,18 +240,6 @@ def call_claude(system, user, max_tokens=2500, imagine_b64=None, imagine_media_t
 def wp_auth_header():
     encoded = base64.b64encode(f"{WP_USER}:{WP_PASS}".encode()).decode()
     return {'Authorization': f'Basic {encoded}', 'Content-Type': 'application/json'}
-REST API-ul WordPress funcționează perfect ✅ — returnează date, deci site-ul e accesibil.
-
-Acum problema e că nu a cerut user/parolă — înseamnă că endpoint-ul `/wp-json/wp/v2/users/me` necesită autentificare dar a returnat date publice.
-
-Problema reală e alta — **Zapier folosește un plugin propriu** pentru autentificare, nu Application Passwords. Dar pentru botul Python, Application Passwords ar trebui să funcționeze.
-
-Să adăugăm logging în cod ca să vedem exact eroarea. Modifică funcția `publica_articol` în `app.py` pe GitHub — adaugă o linie de print:
-
-```python
-
-
-Poți edita direct pe GitHub? 🙏
 def publica_articol(titlu, continut, tags=[], featured_media=None):
     """Publică articol pe WordPress."""
     data = {
