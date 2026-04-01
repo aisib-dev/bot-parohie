@@ -552,13 +552,13 @@ Returnează JSON:
             response = call_claude(SYSTEM_BASE, user, 2000)
             data = parse_json_robust(response)
             data['tip'] = 'post'
-            data['publica_wp'] = False  # Zilele de post obișnuite — doar Facebook
+            data['publica_wp'] = True  # Zilele de post obișnuite — doar Facebook
 
         else:
             # Zi obișnuită (Luni-Sâmbătă)
             data = genereaza_articol_obisnuit(zi, sfinti, extra_text)
             data['tip'] = 'obisnuit'
-            data['publica_wp'] = False  # Zilele obișnuite — doar Facebook
+            data['publica_wp'] = True  # Zilele obișnuite — doar Facebook
 
         if extra_text:
             data['extra_text'] = extra_text
