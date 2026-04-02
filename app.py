@@ -990,8 +990,11 @@ def home():
 
 @app.route('/genereaza')
 def ep_genereaza():
-    threading.Thread(target=genereaza_articol_zilnic).start()
-    return jsonify({'status': 'pornit', 'ora': get_azi().strftime('%H:%M')})
+    try:
+        genereaza_articol_zilnic()
+        return jsonify({'status': 'gata', 'ora': get_azi().strftime('%H:%M')})
+    except Exception as e:
+        return jsonify({'status': 'eroare', 'eroare': str(e)})
 
 @app.route('/citat')
 @app.route('/sfinti')
