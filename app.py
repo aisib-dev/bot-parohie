@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-import anthropic
+from openai import OpenAI
 import requests
 import base64
 import datetime
@@ -14,14 +14,14 @@ app = Flask(__name__)
 # ============================================================
 #  CONFIGURARE
 # ============================================================
-ANTHROPIC_KEY = os.environ.get('ANTHROPIC_KEY', '')
+GROQ_KEY      = os.environ.get('GROQ_KEY', '')
 WP_URL        = os.environ.get('WP_URL', 'https://parohiacetate2.ro')
 WP_USER       = os.environ.get('WP_USER', 'cetate2AI')
 WP_PASS       = os.environ.get('WP_PASS', '')
 TG_TOKEN      = os.environ.get('TG_TOKEN', '')
 TG_CHAT_ID    = os.environ.get('TG_CHAT_ID', '')
 
-client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+client = OpenAI(api_key=GROQ_KEY, base_url="https://api.groq.com/openai/v1")
 pending_articol = {}
 
 # ============================================================
@@ -497,23 +497,28 @@ def trimite_spre_aprobare(articol):
     tg_send(preview)
 
 # ============================================================
-#  CLAUDE API
+#  GROQ API
 # ============================================================
 def call_claude(system, user, max_tokens=4000, img_b64=None, media_type='image/jpeg'):
     content = []
     if img_b64:
         content.append({
-            "type": "image",
-            "source": {"type":"base64","media_type":media_type,"data":img_b64}
+            "type": "image_url",
+            "image_url": {"url": f"data:{media_type};base64,{img_b64}"}
         })
-    content.append({"type":"text","text":user})
-    msg = client.messages.create(
-        model="claude-opus-4-5",
+    content.append({"type": "text", "text": user})
+
+    model = "llama-3.2-90b-vision-preview" if img_b64 else "llama-3.3-70b-versatile"
+
+    response = client.chat.completions.create(
+        model=model,
         max_tokens=max_tokens,
-        system=system,
-        messages=[{"role":"user","content":content}]
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": content}
+        ]
     )
-    return msg.content[0].text
+    return response.choices[0].message.content
 
 def parse_json_robust(text):
     try:
