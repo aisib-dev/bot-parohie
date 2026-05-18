@@ -521,22 +521,47 @@ def call_claude(system, user, max_tokens=4000, img_b64=None, media_type='image/j
     return response.choices[0].message.content
 
 def parse_json_robust(text):
+    def fix_newlines(s):
+        result = []
+        in_string = False
+        i = 0
+        while i < len(s):
+            c = s[i]
+            if c == '"' and (i == 0 or s[i-1] != '\\'):
+                in_string = not in_string
+            if c == '\n' and in_string:
+                result.append('\\n')
+            elif c == '\r' and in_string:
+                result.append('\\r')
+            else:
+                result.append(c)
+            i += 1
+        return ''.join(result)
+
     try:
         return json.loads(text)
     except:
         pass
-    m = re.search(r'```json\s*([\s\S]*?)\s*```', text)
+    m = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
     if m:
+        content = m.group(1)
         try:
-            return json.loads(m.group(1))
+            return json.loads(content)
         except:
-            pass
+            try:
+                return json.loads(fix_newlines(content))
+            except:
+                pass
     m = re.search(r'\{[\s\S]*\}', text)
     if m:
+        content = m.group(0)
         try:
-            return json.loads(m.group(0))
+            return json.loads(content)
         except:
-            pass
+            try:
+                return json.loads(fix_newlines(content))
+            except:
+                pass
     raise ValueError("JSON invalid: " + text[:200])
 
 # ============================================================
