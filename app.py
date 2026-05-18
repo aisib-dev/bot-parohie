@@ -14,7 +14,7 @@ app = Flask(__name__)
 # ============================================================
 #  CONFIGURARE
 # ============================================================
-GROQ_KEY      = os.environ.get('GROQ_KEY', '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')
+GROQ_KEY      = os.environ.get('GROQ_KEY', '')
 WP_URL        = os.environ.get('WP_URL', 'https://parohiacetate2.ro')
 WP_USER       = os.environ.get('WP_USER', 'cetate2AI')
 WP_PASS       = os.environ.get('WP_PASS', '')
