@@ -907,7 +907,7 @@ JSON:
 # ============================================================
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    global pending_articol
+    global pending_articol, edit_mode
     update = request.json
     if not update:
         return jsonify({'ok': True})
@@ -1000,7 +1000,6 @@ def webhook():
         threading.Thread(target=_trigger_regen, daemon=True).start()
 
     elif text == '/editeaza_fb':
-        global edit_mode
         if not pending_articol:
             tg_send("Nu exista articol in asteptare.")
         else:
@@ -1012,7 +1011,6 @@ def webhook():
             )
 
     elif text == '/editeaza_wp':
-        global edit_mode
         if not pending_articol:
             tg_send("Nu exista articol in asteptare.")
         else:
@@ -1093,7 +1091,6 @@ def webhook():
         threading.Thread(target=proc_audio).start()
 
     elif text and not text.startswith('/'):
-        global edit_mode
         if edit_mode == 'fb' and pending_articol:
             pending_articol['fb_text'] = text
             edit_mode = None
