@@ -1436,6 +1436,19 @@ def ep_genereaza():
     except Exception as e:
         return jsonify({'status': 'eroare', 'eroare': str(e)})
 
+@app.route('/preview_fb')
+def ep_preview_fb():
+    art = _load_pending()
+    if not art:
+        return "Nu exista articol in asteptare.", 200
+    fb = art.get('fb_text', '')
+    titlu = art.get('titlu_wp', '')
+    return f"<html><body style='font-family:Georgia,serif;max-width:600px;margin:40px auto;padding:20px;'>" \
+           f"<p style='color:#888;font-size:12px;'>TITLU WP: {titlu}</p>" \
+           f"<hr>" \
+           f"<p style='white-space:pre-wrap;font-size:15px;line-height:1.8;'>{fb}</p>" \
+           f"</body></html>"
+
 @app.route('/citat')
 @app.route('/sfinti')
 @app.route('/mitropolit')
