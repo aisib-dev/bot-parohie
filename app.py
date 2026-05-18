@@ -558,7 +558,9 @@ def trimite_spre_aprobare(articol):
         f"<b>Preview Facebook:</b>\n"
         f"{str(articol.get('fb_text',''))[:500]}...\n\n"
         f"<b>Raspunde cu:</b>\n"
-        f"/aproba - publica acum\n"
+        f"/aproba - WP + Facebook\n"
+        f"/aproba_fb - doar Facebook\n"
+        f"/aproba_wp - doar WordPress\n"
         f"/adaug [text] - adauga gand personal\n"
         f"/editeaza_fb - editeaza textul Facebook\n"
         f"/editeaza_wp - editeaza titlul si continutul WordPress\n"
@@ -1106,6 +1108,48 @@ def webhook():
         except Exception as e:
             tg_send(f"Eroare la publicare: {str(e)}")
 
+    elif text == '/aproba_fb':
+        if not pending_articol:
+            tg_send("Nu exista articol in asteptare.")
+        else:
+            art = pending_articol
+            fb_text = art.get('fb_text', '')
+            fb_id, fb_err = publica_facebook(fb_text)
+            if fb_id:
+                tg_send("✓ Publicat doar pe Facebook!")
+            else:
+                tg_send(f"⚠ Facebook eroare: {fb_err}")
+            pending_articol = {}
+
+    elif text == '/aproba_wp':
+        if not pending_articol:
+            tg_send("Nu exista articol in asteptare.")
+        else:
+            art = pending_articol
+            try:
+                media_id = None
+                if art.get('img_bytes'):
+                    try:
+                        media_id, _ = upload_media(art['img_bytes'], 'foto.jpg', 'image/jpeg')
+                    except:
+                        pass
+                elif art.get('imagine_url'):
+                    try:
+                        ir = requests.get(art['imagine_url'], timeout=10)
+                        if ir.status_code == 200:
+                            media_id, _ = upload_media(ir.content, 'foto.jpg', 'image/jpeg')
+                    except:
+                        pass
+                continut = art.get('continut_wp', '') + art.get('video_bloc', '')
+                post_id, link = publica_articol(art['titlu_wp'], continut, art.get('categorii', [CAT_TRAIESTE]), media_id)
+                if link:
+                    tg_send(f"✓ Publicat doar pe WordPress!\n{link}")
+                else:
+                    tg_send("Eroare - verificati WordPress.")
+            except Exception as e:
+                tg_send(f"Eroare: {str(e)}")
+            pending_articol = {}
+
     elif text.startswith('/adaug '):
         extra = text[7:].strip()
         tg_send("Regenerez cu gandul tau... (30-60 sec)")
@@ -1159,7 +1203,9 @@ def webhook():
             "<b>Bot Parohia Cetate 2 Sibiu</b>\n\n"
             "<b>Comenzi:</b>\n"
             "/genereaza - articolul zilei\n"
-            "/aproba - publica articolul curent\n"
+            "/aproba - publica pe WP + Facebook\n"
+            "/aproba_fb - publica doar pe Facebook\n"
+            "/aproba_wp - publica doar pe WordPress\n"
             "/adaug [text] - adauga gand personal\n"
             "/regenereaza - alt articol\n"
             "/respinge - nu publica azi\n\n"
