@@ -22,6 +22,8 @@ TG_TOKEN      = os.environ.get('TG_TOKEN', '')
 TG_CHAT_ID    = os.environ.get('TG_CHAT_ID', '')
 FB_PAGE_TOKEN = os.environ.get('FB_PAGE_TOKEN', '')
 FB_PAGE_ID    = os.environ.get('FB_PAGE_ID', '')
+APP_URL       = os.environ.get('APP_URL', 'https://bot-parohie.onrender.com')
+ORA_GENERARE  = int(os.environ.get('ORA_GENERARE', '6'))  # ora locala Romania
 
 client = OpenAI(api_key=GROQ_KEY, base_url="https://api.groq.com/openai/v1")
 edit_mode = None  # 'fb' sau 'wp'
@@ -2026,7 +2028,7 @@ def webhook():
         tg_send("Regenerez cu gandul tau... (30-60 sec)")
         def _trigger_adaug():
             try:
-                requests.get(f"https://bot-parohie.onrender.com/genereaza?extra={requests.utils.quote(extra)}", timeout=280)
+                requests.get(f"{APP_URL}/genereaza?extra={requests.utils.quote(extra)}", timeout=280)
             except:
                 pass
         threading.Thread(target=_trigger_adaug, daemon=True).start()
@@ -2060,7 +2062,7 @@ def webhook():
         tg_send("Generez articol nou...")
         def _trigger_regen():
             try:
-                requests.get("https://bot-parohie.onrender.com/genereaza", timeout=280)
+                requests.get(f"{APP_URL}/genereaza", timeout=280)
             except:
                 pass
         threading.Thread(target=_trigger_regen, daemon=True).start()
@@ -2118,7 +2120,7 @@ def webhook():
         tg_send("Generez articolul zilei... (30-60 secunde)")
         def _trigger_gen():
             try:
-                requests.get("https://bot-parohie.onrender.com/genereaza", timeout=280)
+                requests.get(f"{APP_URL}/genereaza", timeout=280)
             except:
                 pass
         threading.Thread(target=_trigger_gen, daemon=True).start()
@@ -2304,7 +2306,7 @@ def ep_alias():
 
 @app.route('/setup_webhook')
 def setup_webhook():
-    url = f"https://api.telegram.org/bot{TG_TOKEN}/setWebhook?url=https://bot-parohie.onrender.com/webhook"
+    url = f"https://api.telegram.org/bot{TG_TOKEN}/setWebhook?url={APP_URL}/webhook"
     r = requests.get(url, timeout=10)
     return jsonify(r.json())
 
@@ -2477,6 +2479,17 @@ def ep_test():
 
 {warnings_html}
 
+<h3 style="color:#8B0000;font-size:14px;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px;">
+  4. Scheduler &amp; Keepalive
+</h3>
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:8px;
+  box-shadow:0 1px 6px rgba(0,0,0,.07);margin-bottom:20px;overflow:hidden;">
+  {row('Ora generare automata', f'{ORA_GENERARE}:00 (Romania)', True)}
+  {row('Ultima generare auto', str(_last_generated_date) if _last_generated_date else '— (nicio generare in sesiunea curenta)', bool(_last_generated_date))}
+  {row('Ora curenta Romania', _ora_ro().strftime('%d.%m.%Y %H:%M:%S'), True)}
+  {row('APP_URL', APP_URL, bool(APP_URL))}
+</table>
+
 <p style="font-size:12px;color:#aaa;margin-top:24px;border-top:1px solid #e8ddd0;padding-top:12px;">
   <a href="/preview_fb" style="color:#8B0000;">→ Preview Facebook</a> &nbsp;|&nbsp;
   <a href="/genereaza" style="color:#8B0000;">→ Genereaza articol</a> &nbsp;|&nbsp;
@@ -2484,6 +2497,62 @@ def ep_test():
 </p>
 </body></html>"""
 
+
+# ============================================================
+#  PING endpoint (keepalive Render.com)
+# ============================================================
+@app.route('/ping')
+def ep_ping():
+    return 'pong', 200
+
+# ============================================================
+#  GENERARE AUTOMATA ZILNICA + KEEPALIVE
+# ============================================================
+try:
+    from zoneinfo import ZoneInfo as _ZoneInfo
+    _TZ_RO = _ZoneInfo('Europe/Bucharest')
+except Exception:
+    _TZ_RO = datetime.timezone(datetime.timedelta(hours=2))
+
+_last_generated_date = None
+
+def _ora_ro():
+    return datetime.datetime.now(tz=_TZ_RO)
+
+def _scheduler_thread():
+    """Verifica la fiecare minut daca e ora generarii automate (ORA_GENERARE, RO)."""
+    global _last_generated_date
+    import time
+    while True:
+        try:
+            now = _ora_ro()
+            if now.hour == ORA_GENERARE and now.minute == 0:
+                today = now.date()
+                if _last_generated_date != today:
+                    _last_generated_date = today
+                    print(f"[scheduler] Generare automata la {now.strftime('%H:%M')} RO")
+                    try:
+                        requests.get(f"{APP_URL}/genereaza", timeout=300)
+                    except Exception as e:
+                        print(f"[scheduler] Eroare generare: {e}")
+        except Exception as e:
+            print(f"[scheduler] Eroare loop: {e}")
+        import time as _time
+        _time.sleep(60)
+
+def _keepalive_thread():
+    """Self-ping la fiecare 10 min ca sa nu adoarma Render.com free tier."""
+    import time
+    time.sleep(30)  # asteapta pornirea completa a aplicatiei
+    while True:
+        try:
+            requests.get(f"{APP_URL}/ping", timeout=10)
+        except Exception:
+            pass
+        time.sleep(590)  # ~10 minute
+
+threading.Thread(target=_scheduler_thread, daemon=True, name='scheduler').start()
+threading.Thread(target=_keepalive_thread, daemon=True, name='keepalive').start()
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
