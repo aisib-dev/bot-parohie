@@ -66,13 +66,15 @@ CAT_CATEHEZE    = 40
 #  SEMNATURA AUTOR
 # ============================================================
 SEMNATURA_HTML = """
-<div style="margin:32px 0 8px 0;padding:18px 22px;background:#fdf8f3;
-border-top:2px solid #8B0000;border-bottom:1px solid #e8ddd0;
-font-family:Georgia,serif;">
-<p style="margin:0;color:#8B0000;font-size:15px;font-weight:bold;letter-spacing:0.3px;">
+<div style="margin:36px 0 8px 0;padding:20px 24px;background:#fdf8f3;
+border-top:3px solid #8B0000;border-bottom:1px solid #e8ddd0;
+font-family:Georgia,serif;border-radius:0 0 6px 6px;">
+<p style="margin:0 0 2px 0;font-size:11px;text-transform:uppercase;
+letter-spacing:2px;color:#c9a227;font-weight:700;">✦ Autor</p>
+<p style="margin:0;color:#8B0000;font-size:16px;font-weight:bold;letter-spacing:0.3px;">
 Pr. Andrei Iancu</p>
 <p style="margin:4px 0 0 0;color:#666;font-size:13px;font-style:italic;">
-Parohia Cetate 2 Sibiu, Mitropolia Ardealului</p>
+Parohia Cetate 2 Sibiu &mdash; Mitropolia Ardealului</p>
 </div>
 """
 
@@ -247,7 +249,7 @@ border-radius:0 8px 8px 0;font-size:14px;line-height:2.4;">
 
 <p style="margin:0 0 10px 0;font-weight:bold;color:#8B0000;font-size:15px;
 letter-spacing:0.5px;text-transform:uppercase;font-family:Georgia,serif;">
-Resurse duhovnicesti</p>
+Resurse duhovnicești</p>
 
 <p style="margin:0 0 8px 0;">
 <a href="https://doxologia.ro/rugaciuni/rugaciunile-diminetii" target="_blank"
@@ -565,33 +567,26 @@ def _parse_calendar_zi_section(section):
     return list(dict.fromkeys(saints)), ap_ref, ev_ref
 
 def fetch_doxologia_calendar(dt):
-    """Preia calendarul ortodox complet de pe doxologia.ro.
-    Structura reala: div.calendar-zi cu linkuri sfinti + linkuri class=ev-zi pentru lecturi.
+    """Preia calendarul ortodox de pe doxologia.ro pentru data specificata.
+    Foloseste URL-ul specific zilei (ex: /18-mai) pentru a evita preluarea
+    gresita a primei zile din luna de pe pagina calendarului lunar.
     """
     zi_data = new_zi_data(dt)
+    luni_ro = ['ianuarie','februarie','martie','aprilie','mai','iunie',
+               'iulie','august','septembrie','octombrie','noiembrie','decembrie']
+    url_zi = f"https://doxologia.ro/{dt.day}-{luni_ro[dt.month - 1]}"
+    zi_data['sources']['doxologia'] = url_zi
     try:
         h = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        r = requests.get('https://doxologia.ro/calendar-ortodox', headers=h, timeout=12)
+        r = requests.get(url_zi, headers=h, timeout=12)
         if r.status_code != 200:
-            zi_data['warnings'].append('doxologia.ro indisponibil')
+            zi_data['warnings'].append(f'doxologia.ro indisponibil (HTTP {r.status_code}): {url_zi}')
             return zi_data
         html = r.text
 
-        # Gaseste ziua curenta: ancora href="/DD-luna" cu textul DD,
-        # urmata de div.calendar-zi
-        day = dt.day
-        pat_day = (
-            r'href="/' + str(day) + r'-[a-z\-]+"[^>]*>\s*'
-            + str(day) + r'\s*</a>'
-            + r'[\s\S]{0,300}?'
-            + r'<div[^>]*class="[^"]*calendar-zi[^"]*"[^>]*>([\s\S]*?)</div>'
-        )
-        m = re.search(pat_day, html)
+        m = re.search(r'<div[^>]*class="[^"]*calendar-zi[^"]*"[^>]*>([\s\S]*?)</div>', html)
         if not m:
-            # Fallback: primul calendar-zi din pagina (ziua curenta)
-            m = re.search(r'<div[^>]*class="[^"]*calendar-zi[^"]*"[^>]*>([\s\S]*?)</div>', html)
-        if not m:
-            zi_data['warnings'].append('Nu s-au gasit date pe doxologia.ro')
+            zi_data['warnings'].append(f'Nu s-a gasit div.calendar-zi pe {url_zi}')
             return zi_data
 
         saints, ap_ref, ev_ref = _parse_calendar_zi_section(m.group(1))
@@ -1125,7 +1120,13 @@ def wp_auth():
 def publica_articol(titlu, continut, categorii=None, featured_media=None):
     if categorii is None:
         categorii = [CAT_TRAIESTE]
-    continut_final = continut + WIDGET_DOXOLOGIA + SEMNATURA_HTML + get_bloc_resurse()
+    corp = (
+        '<div style="font-family:Georgia,serif;color:#2c1a00;line-height:1.9;'
+        'font-size:15px;max-width:780px;">'
+        + _style_articol_html(continut)
+        + '</div>'
+    )
+    continut_final = corp + WIDGET_DOXOLOGIA + SEMNATURA_HTML + get_bloc_resurse()
     data = {
         'title': titlu,
         'content': continut_final,
@@ -1297,6 +1298,7 @@ def trimite_spre_aprobare(articol):
 #  GROQ API
 # ============================================================
 def call_claude(system, user, max_tokens=4000, img_b64=None, media_type='image/jpeg'):
+    import time
     content = []
     if img_b64:
         content.append({
@@ -1305,17 +1307,50 @@ def call_claude(system, user, max_tokens=4000, img_b64=None, media_type='image/j
         })
     content.append({"type": "text", "text": user})
 
-    model = "llama-3.2-90b-vision-preview" if img_b64 else "llama-3.3-70b-versatile"
+    # Modele in ordinea preferintei: primul cu calitate maxima, al doilea fallback cu limite mai mari
+    if img_b64:
+        models_to_try = ["llama-3.2-90b-vision-preview"]
+    else:
+        models_to_try = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
 
-    response = client.chat.completions.create(
-        model=model,
-        max_tokens=max_tokens,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": content}
-        ]
+    last_err = None
+    for model in models_to_try:
+        for attempt in range(2):
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    max_tokens=max_tokens,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": content}
+                    ]
+                )
+                return response.choices[0].message.content
+            except Exception as e:
+                last_err = e
+                err = str(e)
+                if 'rate_limit_exceeded' in err and 'tokens' in err:
+                    wait = 65
+                    m2 = re.search(r'try again in\s+(?:(\d+)m)?(\d+(?:\.\d+)?)s', err)
+                    if m2:
+                        mins = int(m2.group(1) or 0)
+                        secs = float(m2.group(2))
+                        wait = mins * 60 + secs + 5
+                    if wait > 900:
+                        # Limita zilnica - trece la modelul urmator
+                        print(f"Groq TPD limit pe {model} - incerc modelul urmator")
+                        break  # iese din bucla attempt, trece la urmatorul model
+                    print(f"Groq rate limit {model} - astept {wait:.0f}s")
+                    time.sleep(wait)
+                    continue
+                raise  # eroare ne-rate-limit → arunca imediat
+    # Toate modelele au esuat cu limita zilnica
+    tg_send(
+        "⚠️ Limita zilnică de tokeni Groq atinsă pe toate modelele!\n"
+        "Încearcă din nou mâine (reset ora 03:00 RO).\n"
+        "La groq.com, Developer tier e momentan indisponibil pentru upgrade."
     )
-    return response.choices[0].message.content
+    raise last_err
 
 def transcrie_audio_groq(audio_bytes, mime='audio/ogg'):
     """Transcrie audio cu Groq Whisper-large-v3, limbă română."""
@@ -1555,6 +1590,26 @@ def genereaza_articol_zilnic(extra_text=''):
         tg_send(f"Eroare generare: {str(e)}\n{eroare[:200]}")
         return None
 
+def _style_articol_html(html):
+    """Post-procesare HTML generat de AI: stiluri uniforme pe h2/h3/p/blockquote."""
+    H2 = ('color:#8B0000;font-family:Georgia,serif;font-size:20px;font-weight:bold;'
+          'border-bottom:2px solid #c9a227;padding-bottom:8px;'
+          'margin:32px 0 16px 0;text-transform:uppercase;letter-spacing:1px;')
+    H3 = ('color:#5a2000;font-family:Georgia,serif;font-size:16px;font-weight:bold;'
+          'margin:24px 0 12px 0;text-transform:uppercase;letter-spacing:0.5px;')
+    P  = ('font-family:Georgia,serif;line-height:1.95;color:#2c1a00;'
+          'font-size:15px;margin:0 0 16px 0;')
+    BQ = ('border-left:4px solid #8B0000;padding:14px 20px;margin:24px 0;'
+          'background:#fdf8f3;font-style:italic;color:#4a1a00;'
+          'font-family:Georgia,serif;font-size:15px;line-height:1.9;'
+          'border-radius:0 6px 6px 0;')
+    html = re.sub(r'<h2(?:\s[^>]*)?>', f'<h2 style="{H2}">', html, flags=re.IGNORECASE)
+    html = re.sub(r'<h3(?:\s[^>]*)?>', f'<h3 style="{H3}">', html, flags=re.IGNORECASE)
+    html = re.sub(r'<blockquote(?:\s[^>]*)?>', f'<blockquote style="{BQ}">', html, flags=re.IGNORECASE)
+    # Adauga stil doar la <p> fara style= deja setat (evita suprascrierea blocurilor sfinti/familie)
+    html = re.sub(r'<p(?![^>]*style=)([^>]*)>', f'<p style="{P}">', html, flags=re.IGNORECASE)
+    return html
+
 # ============================================================
 #  GENERATOARE SPECIFICE
 # ============================================================
@@ -1625,7 +1680,7 @@ Structura HTML AERISITA cu paragrafe scurte si spatii generoase.
 JSON:
 {{
   "titlu_wp": "titlu evocator, poetic, nu banal - 6-10 cuvinte",
-  "continut_wp": "HTML complet aerisit: <h2 style='color:#8B0000;font-family:Georgia,serif;'>Sfintii zilei</h2> <p>descriere vie a fiecarui sfant, legatura cu viata de azi</p> <h2 style='color:#8B0000;font-family:Georgia,serif;'>Meditatie duhovniceasca</h2> <p>paragraf 1 - deschide cu o intrebare sau imagine poetica</p> <p>paragraf 2 - dezvoltare teologica accesibila cu referinta patristica concreta</p> <p>paragraf 3 - aplicatie pastorala calda</p> <h3 style='color:#8B0000;'>Morala zilei</h3> <p>un paragraf scurt, memorabil, practic</p>",
+  "continut_wp": "HTML structurat: <h2>Sfinții zilei</h2><p>descriere vie a fiecarui sfant, legatura cu viata de azi</p><h2>Meditație duhovnicească</h2><p>paragraf 1 - deschide cu o intrebare sau imagine poetica</p><p>paragraf 2 - dezvoltare teologica accesibila cu referinta patristica concreta</p><p>paragraf 3 - aplicatie pastorala calda</p><h3>Morala zilei</h3><p>un paragraf scurt, memorabil, practic</p>",
   "fb_text": "220-260 cuvinte: incepe cu un verset scurt exact din Apostol sau Evanghelie (din Biblia Ortodoxa Romana) pus intre ghilimele cu referinta (ex: Ioan 3,16) + mentionezi explicit sfintii zilei ({sfinti}) + meditatie calda 3-4 randuri stil Pr. Necula + intrebare sau indemn concret + la final adauga citatul despre familie din context (pe rand nou, italic, cu liniuta si autor) + #ParohiaCetate2Sibiu #EvanghelliaZilei #SfintiiZilei #FamiliaCrestina #Ortodox #Sibiu"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 4500))
@@ -1635,7 +1690,7 @@ JSON:
 
 
 def _gen_duminica(zi, sfinti, apostol, evanghelie, ips, s_extra, s_spec, s_an):
-    ips_html = '+ <h2 style="color:#8B0000;">Cuvant arhieresc</h2> <p>citat inspirat si autentic din predicile IPS Laurentiu Streza al Ardealului, cu referinta la mitropolia-ardealului.ro</p>' if ips else ''
+    ips_html = '<h2>Cuvânt arhieresc</h2><p>citat inspirat si autentic din predicile IPS Laurentiu Streza al Ardealului, cu referinta la mitropolia-ardealului.ro</p>' if ips else ''
     u = f"""Astazi este {zi}, Duminica. Sfintii zilei: {sfinti}.
 Apostolul Duminicii: {apostol}.
 Evanghelia Duminicii: {evanghelie}.{s_spec}{s_an}{s_extra}
@@ -1644,7 +1699,7 @@ Genereaza articolul duminical pentru Parohia Cetate 2 Sibiu.
 JSON:
 {{
   "titlu_wp": "titlu duminical profund si evocator - 6-10 cuvinte",
-  "continut_wp": "HTML aerisit: <h2 style='color:#8B0000;font-family:Georgia,serif;'>Sfintii Duminicii</h2> <p>descriere</p> <h2 style='color:#8B0000;font-family:Georgia,serif;'>Predica Duminicii</h2> <p>deschide cu o intrebare existentiala</p> <p>dezvoltare teologica 2-3 paragrafe cu referinte patristice</p> <p>aplicatie pastorala calda</p> {ips_html} <h3 style='color:#8B0000;'>Morala Duminicii</h3> <p>concluzie practica si indemn pentru saptamana</p>",
+  "continut_wp": "HTML structurat: <h2>Sfinții Duminicii</h2><p>descriere</p><h2>Predica Duminicii</h2><p>deschide cu o intrebare existentiala</p><p>dezvoltare teologica 2-3 paragrafe cu referinte patristice</p><p>aplicatie pastorala calda</p>{ips_html}<h3>Morala Duminicii</h3><p>concluzie practica si indemn pentru saptamana</p>",
   "fb_text": "250-280 cuvinte: verset exact din Evanghelia duminicii (din Biblia Ortodoxa Romana) pus intre ghilimele cu referinta + sfintii duminicii ({sfinti}) + meditatie duminicala calda 3-4 randuri + urare calduroasa + la final citatul despre familie din context (pe rand nou, italic, cu liniuta si autor) + #DuminicaOrtodoxa #FamiliaCrestina #ParohiaCetate2Sibiu #Evanghelie #Sibiu"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 5500))
@@ -1662,7 +1717,7 @@ Stilul: urare calda ca Patriarhul Daniel + profunzime ca Schmemann + bucurie ca 
 JSON:
 {{
   "titlu_wp": "titlu festiv si evocator",
-  "continut_wp": "HTML festiv aerisit: <h2 style='color:#8B0000;font-family:Georgia,serif;'>{nume}</h2> <p>semnificatia sarbatorii in 1-2 paragrafe</p> <blockquote style='border-left:4px solid #8B0000;padding:12px 16px;margin:16px 0;background:#fdf8f3;font-style:italic;'>Troparul sarbatorii</blockquote> <blockquote style='border-left:4px solid #c9a227;padding:12px 16px;margin:16px 0;background:#fffdf5;font-style:italic;'>Condacul</blockquote> <h2 style='color:#8B0000;font-family:Georgia,serif;'>Meditatie</h2> <p>2-3 paragrafe despre taina sarbatorii cu referinte patristice</p> <h3 style='color:#8B0000;'>Morala sarbatorii</h3> <p>urare calda pentru credinciosi</p>",
+  "continut_wp": "HTML structurat: <h2>{nume}</h2><p>semnificatia sarbatorii in 1-2 paragrafe</p><blockquote>Troparul sarbatorii (text real)</blockquote><blockquote>Condacul sarbatorii (text real)</blockquote><h2>Meditație</h2><p>2-3 paragrafe despre taina sarbatorii cu referinte patristice</p><h3>Morala sărbătorii</h3><p>urare calda pentru credinciosi</p>",
   "fb_text": "220-260 cuvinte: urare calda de sarbatoare + verset exact din Evanghelia sarbatorii (din Biblia Ortodoxa Romana) intre ghilimele cu referinta + Tropar scurt + meditatie 2-3 randuri + indemn la slujba + emoji potrivite + #ParohiaCetate2Sibiu #{nume.replace(' ','')} #Ortodox #Sibiu"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 5000))
@@ -1679,7 +1734,7 @@ Genereaza articolul de inceput de post pentru Parohia Cetate 2 Sibiu.
 JSON:
 {{
   "titlu_wp": "titlu poetic despre inceperea postului",
-  "continut_wp": "HTML aerisit: <h2 style='color:#8B0000;font-family:Georgia,serif;'>Incepe {nume}</h2> <p>semnificatia duhovniceasca in 1-2 paragrafe</p> <h2 style='color:#8B0000;'>Postul - scoala a sufletului</h2> <p>paragraf 1 - citat din Sf. Ioan Gura de Aur despre post</p> <p>paragraf 2 - citat din Sf. Vasile sau Sf. Isaac Sirul</p> <p>paragraf 3 - sfaturi practice duhovnicesti</p> <h3 style='color:#8B0000;'>Morala</h3> <p>binecuvantare pentru post</p>",
+  "continut_wp": "HTML structurat: <h2>Începe {nume}</h2><p>semnificatia duhovniceasca in 1-2 paragrafe</p><h2>Postul — școala sufletului</h2><p>citat din Sf. Ioan Gura de Aur despre post</p><p>citat din Sf. Vasile sau Sf. Isaac Sirul</p><p>sfaturi practice duhovnicesti</p><h3>Morala</h3><p>binecuvantare pentru post</p>",
   "fb_text": "200-240 cuvinte: caldura pastorala + citat patristic despre post + indemn concret + Post cu folos! + hashtag-uri #Post{nume.replace(' ','')} #ParohiaCetate2Sibiu #Ortodox"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 4500))
@@ -1697,7 +1752,7 @@ Genereaza meditatie pentru zi de post, Parohia Cetate 2 Sibiu.
 JSON:
 {{
   "titlu_wp": "titlu poetic pentru zi de post",
-  "continut_wp": "HTML aerisit: <h2 style='color:#8B0000;font-family:Georgia,serif;'>Sfintii zilei</h2> <p>descriere scurta</p> <h2 style='color:#8B0000;font-family:Georgia,serif;'>Postul ca rugaciune a trupului</h2> <p>paragraf 1 - sensul postului dincolo de abtinere</p> <p>paragraf 2 - intalnirea cu Dumnezeu prin post, citat patristic</p> <p>paragraf 3 - aplicatie practica pentru ziua de azi</p> <h3 style='color:#8B0000;'>Morala zilei</h3> <p>un indemn scurt si memorabil</p>",
+  "continut_wp": "HTML structurat: <h2>Sfinții zilei</h2><p>descriere scurta</p><h2>Postul — rugăciunea trupului</h2><p>sensul postului dincolo de abtinere</p><p>intalnirea cu Dumnezeu prin post, citat patristic</p><p>aplicatie practica pentru ziua de azi</p><h3>Morala zilei</h3><p>un indemn scurt si memorabil</p>",
   "fb_text": "180-220 cuvinte: verset exact din Apostol sau Evanghelie (din Biblia Ortodoxa Romana) intre ghilimele + sfintii zilei ({sfinti}) + citat patristic scurt despre post + indemn concret pentru zi de post + la final citatul despre familie din context (pe rand nou, italic) + #ZiDePost #FamiliaCrestina #ParohiaCetate2Sibiu #Ortodox"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 4000))
@@ -1715,7 +1770,7 @@ Ton: solemn, profund, cu nadejdea Invierii stralucind prin Patimi - ca la Schmem
 JSON:
 {{
   "titlu_wp": "{titlu_zi} - titlu solemn si evocator",
-  "continut_wp": "HTML solemn aerisit: <h2 style='color:#8B0000;font-family:Georgia,serif;'>{titlu_zi}</h2> <p>contextul biblic al zilei in 1-2 paragrafe</p> <h2 style='color:#8B0000;font-family:Georgia,serif;'>Semnificatia liturgica</h2> <p>explicarea slujbei zilei cu referinte la Triod</p> <h2 style='color:#8B0000;font-family:Georgia,serif;'>Meditatie</h2> <p>2-3 paragrafe in spiritul Triodului, cu referinte patristice, cu nadejdea Invierii</p> <h3 style='color:#8B0000;'>Morala</h3> <p>rugaciune scurta de incheiere sau indemn solemn</p>",
+  "continut_wp": "HTML structurat: <h2>{titlu_zi}</h2><p>contextul biblic al zilei in 1-2 paragrafe</p><h2>Semnificația liturgică</h2><p>explicarea slujbei zilei cu referinte la Triod</p><h2>Meditație</h2><p>2-3 paragrafe in spiritul Triodului, cu referinte patristice, cu nadejdea Invierii</p><h3>Morala</h3><p>rugaciune scurta de incheiere sau indemn solemn</p>",
   "fb_text": "200-240 cuvinte: solemn cu nadejde + Apostol + Evanghelie + taina zilei + emoji ✝ + #SaptamanaMare #{titlu_zi.replace(' ','')} #ParohiaCetate2Sibiu"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 5000))
