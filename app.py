@@ -493,8 +493,11 @@ def fetch_biblia_ortodoxa_verse(reference):
         r = requests.get(url, headers=h, timeout=12)
         if r.status_code != 200:
             return {'reference': reference, 'text': '', 'source_url': url, 'verified': False}
-        # Versete: <p><strong>N.</strong> text</p>
-        versete = re.findall(r'<p[^>]*><strong>(\d+)\.?</strong>\s*([\s\S]*?)</p>', r.text, re.IGNORECASE)
+        # Versete: <tr id=versetN> cu textul in al doilea <td>
+        versete = re.findall(
+            r'<tr[^>]*id=verset(\d+)[^>]*>[\s\S]*?<td[^>]*>[\s\S]*?</td>\s*<td>([\s\S]*?)</td>\s*</tr>',
+            r.text
+        )
         if not versete:
             return {'reference': reference, 'text': '', 'source_url': url, 'verified': False}
         vs = v_start or 1
@@ -560,21 +563,20 @@ def get_imagine_doxologia(query=''):
     return get_imagine_fallback(query)
 
 def get_imagine_fallback(query=''):
-    # Imagini de pe commons.wikimedia.org - accesibile prin URL direct
+    # Upload direct Wikimedia - fara thumb, fara redirect, referrerpolicy=no-referrer in HTML
     imagini = {
-        'craciun':   'https://commons.wikimedia.org/wiki/Special:FilePath/Nativity_icon_Sinai_12th_century.jpg',
-        'paste':     'https://commons.wikimedia.org/wiki/Special:FilePath/Anastasis_mosaic,_Chora_church,_Constantinople,_14th_century.jpg',
-        'florii':    'https://commons.wikimedia.org/wiki/Special:FilePath/Entry_into_Jerusalem_(icon).jpg',
-        'boboteaza': 'https://commons.wikimedia.org/wiki/Special:FilePath/Baptism_of_Christ,_mosaic,_Baptistry_of_Neon,_Ravenna_(5th_century).jpg',
-        'post':      'https://commons.wikimedia.org/wiki/Special:FilePath/Christ_in_the_Wilderness_-_Ivan_Kramskoy_-_1872.jpg',
-        'maica':     'https://commons.wikimedia.org/wiki/Special:FilePath/Theotokos_of_Vladimir.jpg',
-        'cruce':     'https://commons.wikimedia.org/wiki/Special:FilePath/The_Crucifixion_icon,_Novgorod_school,_late_15c.jpg',
-        'nicolae':   'https://commons.wikimedia.org/wiki/Special:FilePath/Nicholas_of_Myra_icon_(Jaroslavl,_13_c.).jpg',
-        'andrei':    'https://commons.wikimedia.org/wiki/Special:FilePath/Saint_Andrew_the_Apostle_(icon).jpg',
-        'schimbare': 'https://commons.wikimedia.org/wiki/Special:FilePath/Transfiguration_by_Feofan_Grek.jpg',
-        'inaltare':  'https://commons.wikimedia.org/wiki/Special:FilePath/Ascension_of_Jesus_Christ_icon_(Yaroslavl,_16th_c).jpg',
-        'duminica':  'https://commons.wikimedia.org/wiki/Special:FilePath/Christ_Pantocrator_mosaic_from_Hagia_Sophia.jpg',
-        'default':   'https://commons.wikimedia.org/wiki/Special:FilePath/Mitropolia_Ardealului_Sibiu.jpg',
+        'craciun':   'https://upload.wikimedia.org/wikipedia/commons/8/8c/Nativity_icon_Sinai_12th_century.jpg',
+        'paste':     'https://upload.wikimedia.org/wikipedia/commons/b/b4/The_Resurrection_icon_%28Greek%2C_16th_c%29.jpg',
+        'florii':    'https://upload.wikimedia.org/wikipedia/commons/b/b2/Entry_into_Jerusalem_%28Pskov%2C_16c%29.jpg',
+        'boboteaza': 'https://upload.wikimedia.org/wikipedia/commons/a/a5/Theophany_icon_%28Yaroslavl%2C_17th_c.%29.jpg',
+        'post':      'https://upload.wikimedia.org/wikipedia/commons/5/5b/Christ_in_the_Wilderness_-_Ivan_Kramskoy_-_1872.jpg',
+        'maica':     'https://upload.wikimedia.org/wikipedia/commons/1/1b/Theotokos_of_Vladimir.jpg',
+        'cruce':     'https://upload.wikimedia.org/wikipedia/commons/1/17/Crucifixion_icon_sinai_10c.jpg',
+        'nicolae':   'https://upload.wikimedia.org/wikipedia/commons/0/04/Saint_Nicholas_icon_%28Lipnya_church%2C_Novgorod%29.jpg',
+        'schimbare': 'https://upload.wikimedia.org/wikipedia/commons/3/38/Transfiguration_by_Feofan_Grek.jpg',
+        'inaltare':  'https://upload.wikimedia.org/wikipedia/commons/4/46/Ascension_icon_%28Yaroslavl%2C_16th_c%29.jpg',
+        'duminica':  'https://upload.wikimedia.org/wikipedia/commons/d/d9/Christ_Pantocrator_mosaic_from_Hagia_Sophia.jpg',
+        'default':   'https://upload.wikimedia.org/wikipedia/commons/d/d9/Christ_Pantocrator_mosaic_from_Hagia_Sophia.jpg',
     }
     q = query.lower()
     for k, v in imagini.items():
@@ -1713,7 +1715,8 @@ def ep_preview_fb():
     warnings = zi_data.get('warnings', [])
 
     img_html = (
-        f'<img src="{img}" style="width:100%;border-radius:8px;margin-bottom:16px;'
+        f'<img src="{img}" referrerpolicy="no-referrer" crossorigin="anonymous" '
+        f'style="width:100%;border-radius:8px;margin-bottom:16px;'
         f'object-fit:cover;max-height:340px;" alt="Imagine articol" />'
         if img else ''
     )
@@ -1875,7 +1878,8 @@ def ep_test():
   3. Imagine fallback
 </h3>
 <div style="background:#fff;border-radius:8px;padding:12px;box-shadow:0 1px 6px rgba(0,0,0,.07);margin-bottom:20px;">
-  <img src="{img_url}" style="max-width:100%;border-radius:6px;max-height:200px;object-fit:cover;"
+  <img src="{img_url}" referrerpolicy="no-referrer" crossorigin="anonymous"
+       style="max-width:100%;border-radius:6px;max-height:200px;object-fit:cover;"
        onerror="this.style.display='none';document.getElementById('img-err').style.display='block';" />
   <div id="img-err" style="display:none;color:#c62828;font-size:13px;padding:8px 0;">
     ✗ Imaginea nu s-a incarcat: {img_url}
