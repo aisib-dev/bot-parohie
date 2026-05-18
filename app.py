@@ -1026,7 +1026,7 @@ JSON:
 {{
   "titlu_wp": "titlu evocator, poetic, nu banal - 6-10 cuvinte",
   "continut_wp": "HTML complet aerisit: <h2 style='color:#8B0000;font-family:Georgia,serif;'>Sfintii zilei</h2> <p>descriere vie a fiecarui sfant, legatura cu viata de azi</p> <h2 style='color:#8B0000;font-family:Georgia,serif;'>Meditatie duhovniceasca</h2> <p>paragraf 1 - deschide cu o intrebare sau imagine poetica</p> <p>paragraf 2 - dezvoltare teologica accesibila cu referinta patristica concreta</p> <p>paragraf 3 - aplicatie pastorala calda</p> <h3 style='color:#8B0000;'>Morala zilei</h3> <p>un paragraf scurt, memorabil, practic</p>",
-  "fb_text": "220-260 cuvinte: incepe cu un verset scurt exact din Apostol sau Evanghelie (din Biblia Ortodoxa Romana) pus intre ghilimele cu referinta (ex: Ioan 3,16) + mentionezi explicit sfintii zilei ({sfinti}) + meditatie calda 3-4 randuri stil Pr. Necula + intrebare sau indemn concret + #ParohiaCetate2Sibiu #EvanghelliaZilei #SfintiiZilei #Ortodox #Sibiu"
+  "fb_text": "220-260 cuvinte: incepe cu un verset scurt exact din Apostol sau Evanghelie (din Biblia Ortodoxa Romana) pus intre ghilimele cu referinta (ex: Ioan 3,16) + mentionezi explicit sfintii zilei ({sfinti}) + meditatie calda 3-4 randuri stil Pr. Necula + intrebare sau indemn concret + la final adauga citatul despre familie din context (pe rand nou, italic, cu liniuta si autor) + #ParohiaCetate2Sibiu #EvanghelliaZilei #SfintiiZilei #FamiliaCrestina #Ortodox #Sibiu"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 4500))
     # Inserez blocul lecturilor la inceput
@@ -1045,7 +1045,7 @@ JSON:
 {{
   "titlu_wp": "titlu duminical profund si evocator - 6-10 cuvinte",
   "continut_wp": "HTML aerisit: <h2 style='color:#8B0000;font-family:Georgia,serif;'>Sfintii Duminicii</h2> <p>descriere</p> <h2 style='color:#8B0000;font-family:Georgia,serif;'>Predica Duminicii</h2> <p>deschide cu o intrebare existentiala</p> <p>dezvoltare teologica 2-3 paragrafe cu referinte patristice</p> <p>aplicatie pastorala calda</p> {ips_html} <h3 style='color:#8B0000;'>Morala Duminicii</h3> <p>concluzie practica si indemn pentru saptamana</p>",
-  "fb_text": "250-280 cuvinte: verset exact din Evanghelia duminicii (din Biblia Ortodoxa Romana) pus intre ghilimele cu referinta + sfintii duminicii ({sfinti}) + meditatie duminicala calda 3-4 randuri + urare calduroasa + #DuminicaOrtodoxa #ParohiaCetate2Sibiu #Evanghelie #Predica #Sibiu"
+  "fb_text": "250-280 cuvinte: verset exact din Evanghelia duminicii (din Biblia Ortodoxa Romana) pus intre ghilimele cu referinta + sfintii duminicii ({sfinti}) + meditatie duminicala calda 3-4 randuri + urare calduroasa + la final citatul despre familie din context (pe rand nou, italic, cu liniuta si autor) + #DuminicaOrtodoxa #FamiliaCrestina #ParohiaCetate2Sibiu #Evanghelie #Sibiu"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 5500))
     d['continut_wp'] = _bloc_lecturi(apostol, evanghelie) + d.get('continut_wp','')
@@ -1098,7 +1098,7 @@ JSON:
 {{
   "titlu_wp": "titlu poetic pentru zi de post",
   "continut_wp": "HTML aerisit: <h2 style='color:#8B0000;font-family:Georgia,serif;'>Sfintii zilei</h2> <p>descriere scurta</p> <h2 style='color:#8B0000;font-family:Georgia,serif;'>Postul ca rugaciune a trupului</h2> <p>paragraf 1 - sensul postului dincolo de abtinere</p> <p>paragraf 2 - intalnirea cu Dumnezeu prin post, citat patristic</p> <p>paragraf 3 - aplicatie practica pentru ziua de azi</p> <h3 style='color:#8B0000;'>Morala zilei</h3> <p>un indemn scurt si memorabil</p>",
-  "fb_text": "180-220 cuvinte: verset exact din Apostol sau Evanghelie (din Biblia Ortodoxa Romana) intre ghilimele + sfintii zilei ({sfinti}) + citat patristic scurt despre post + indemn concret pentru zi de post + #ZiDePost #ParohiaCetate2Sibiu #Ortodox"
+  "fb_text": "180-220 cuvinte: verset exact din Apostol sau Evanghelie (din Biblia Ortodoxa Romana) intre ghilimele + sfintii zilei ({sfinti}) + citat patristic scurt despre post + indemn concret pentru zi de post + la final citatul despre familie din context (pe rand nou, italic) + #ZiDePost #FamiliaCrestina #ParohiaCetate2Sibiu #Ortodox"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 4000))
     d['continut_wp'] = _bloc_lecturi(apostol, evanghelie) + d.get('continut_wp','')
