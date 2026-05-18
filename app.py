@@ -23,7 +23,7 @@ TG_CHAT_ID    = os.environ.get('TG_CHAT_ID', '')
 FB_PAGE_TOKEN = os.environ.get('FB_PAGE_TOKEN', '')
 FB_PAGE_ID    = os.environ.get('FB_PAGE_ID', '')
 APP_URL       = os.environ.get('APP_URL', 'https://bot-parohie.onrender.com')
-ORA_GENERARE  = int(os.environ.get('ORA_GENERARE', '6'))  # ora locala Romania
+ORA_GENERARE  = int(os.environ.get('ORA_GENERARE', '8'))  # ora locala Romania
 
 client = OpenAI(api_key=GROQ_KEY, base_url="https://api.groq.com/openai/v1")
 edit_mode = None  # 'fb' sau 'wp'
