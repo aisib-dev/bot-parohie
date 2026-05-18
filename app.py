@@ -484,9 +484,17 @@ def tg_get_file(file_id):
 def trimite_spre_aprobare(articol):
     global pending_articol
     pending_articol = articol
+    sfinti_link = ''
+    if articol.get('sfinti_list'):
+        sfinti_str = ', '.join(articol['sfinti_list'])
+        sfinti_link = f'\n<b>Sfintii zilei:</b> <a href="https://doxologia.ro/calendar-ortodox">{sfinti_str}</a>'
+    lecturi_link = ''
+    if articol.get('apostol') or articol.get('evanghelie'):
+        lecturi_link = f'\n<a href="https://doxologia.ro/lecturile-zilei">Apostolul si Evanghelia zilei ↗</a>'
     preview = (
         f"<b>ARTICOL GENERAT</b>\n"
-        f"<b>{articol.get('titlu_wp','')}</b>\n\n"
+        f"<b>{articol.get('titlu_wp','')}</b>"
+        f"{sfinti_link}{lecturi_link}\n\n"
         f"<b>Preview Facebook:</b>\n"
         f"{str(articol.get('fb_text',''))[:500]}...\n\n"
         f"<b>Raspunde cu:</b>\n"
@@ -661,6 +669,14 @@ def genereaza_articol_zilnic(extra_text=''):
             data = _gen_zi_obisnuita(zi, sfinti_str, apostol, evanghelie, s_extra, s_spec, s_an)
             data['categorii'] = [CAT_TRAIESTE, CAT_POSTARI_NOI]
 
+        # Metadata pentru preview Telegram
+        data['sfinti_list'] = sfinti
+        data['apostol']     = apostol
+        data['evanghelie']  = evanghelie
+
+        # Adauga bloc sfinti la inceputul articolului
+        data['continut_wp'] = _bloc_sfinti(sfinti) + data.get('continut_wp', '')
+
         # Imagine
         query = data.get('imagine_query', tip)
         data['imagine_url'] = get_imagine(tip, query)
@@ -678,17 +694,35 @@ def genereaza_articol_zilnic(extra_text=''):
 # ============================================================
 #  GENERATOARE SPECIFICE
 # ============================================================
+def _bloc_sfinti(sfinti_list):
+    if not sfinti_list:
+        return ''
+    sfinti_str = ', '.join(sfinti_list)
+    return (
+        f'<div style="background:#fffdf5;border-left:3px solid #c9a227;padding:12px 20px;margin:16px 0;border-radius:0 6px 6px 0;">'
+        f'<p style="margin:0 0 4px 0;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#c9a227;font-weight:bold;">'
+        f'<a href="https://doxologia.ro/calendar-ortodox" target="_blank" style="color:#c9a227;text-decoration:none;">Sfintii zilei ↗</a></p>'
+        f'<p style="margin:0;color:#333;line-height:1.8;font-style:italic;">{sfinti_str}</p>'
+        f'</div>'
+    )
+
 def _bloc_lecturi(apostol, evanghelie):
-    """Bloc HTML elegant pentru Apostol si Evanghelie"""
     if not apostol and not evanghelie:
         return ''
+    url_lecturi = 'https://doxologia.ro/lecturile-zilei'
     bloc = '<div style="background:#fdf8f3;border-left:3px solid #8B0000;padding:16px 20px;margin:20px 0;border-radius:0 6px 6px 0;">'
     if apostol:
-        bloc += f'<p style="margin:0 0 6px 0;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#8B0000;font-weight:bold;">Apostolul zilei</p>'
-        bloc += f'<p style="margin:0 0 16px 0;font-style:italic;color:#333;line-height:1.8;">{apostol}</p>'
+        bloc += (
+            f'<p style="margin:0 0 6px 0;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#8B0000;font-weight:bold;">'
+            f'<a href="{url_lecturi}" target="_blank" style="color:#8B0000;text-decoration:none;">Apostolul zilei ↗</a></p>'
+            f'<p style="margin:0 0 16px 0;font-style:italic;color:#333;line-height:1.8;">{apostol}</p>'
+        )
     if evanghelie:
-        bloc += f'<p style="margin:0 0 6px 0;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#8B0000;font-weight:bold;">Evanghelia zilei</p>'
-        bloc += f'<p style="margin:0;font-style:italic;color:#333;line-height:1.8;">{evanghelie}</p>'
+        bloc += (
+            f'<p style="margin:0 0 6px 0;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#8B0000;font-weight:bold;">'
+            f'<a href="{url_lecturi}" target="_blank" style="color:#8B0000;text-decoration:none;">Evanghelia zilei ↗</a></p>'
+            f'<p style="margin:0;font-style:italic;color:#333;line-height:1.8;">{evanghelie}</p>'
+        )
     bloc += '</div>'
     return bloc
 
