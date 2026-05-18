@@ -24,8 +24,33 @@ FB_PAGE_TOKEN = os.environ.get('FB_PAGE_TOKEN', '')
 FB_PAGE_ID    = os.environ.get('FB_PAGE_ID', '')
 
 client = OpenAI(api_key=GROQ_KEY, base_url="https://api.groq.com/openai/v1")
-pending_articol = {}
 edit_mode = None  # 'fb' sau 'wp'
+
+PENDING_FILE = '/tmp/pending_articol.json'
+
+def _load_pending():
+    try:
+        with open(PENDING_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except:
+        return {}
+
+def _save_pending(data):
+    try:
+        # img_bytes si audio_bytes nu se pot serializa in JSON - salvam separat
+        d = {k: v for k, v in data.items() if k not in ('img_bytes', 'audio_bytes')}
+        with open(PENDING_FILE, 'w', encoding='utf-8') as f:
+            json.dump(d, f, ensure_ascii=False)
+    except:
+        pass
+
+def _clear_pending():
+    try:
+        os.remove(PENDING_FILE)
+    except:
+        pass
+
+pending_articol = _load_pending()
 
 # ============================================================
 #  CATEGORII WORDPRESS
@@ -568,6 +593,7 @@ def tg_get_file(file_id):
 def trimite_spre_aprobare(articol):
     global pending_articol
     pending_articol = articol
+    _save_pending(articol)
     sfinti_link = ''
     if articol.get('sfinti_list'):
         sfinti_str = ', '.join(articol['sfinti_list'])
@@ -1128,6 +1154,7 @@ def webhook():
             else:
                 tg_send("Eroare - verificati WordPress.")
             pending_articol = {}
+            _clear_pending()
 
         except Exception as e:
             tg_send(f"Eroare la publicare: {str(e)}")
@@ -1146,6 +1173,7 @@ def webhook():
             else:
                 tg_send(f"⚠ Facebook eroare: {fb_err}")
             pending_articol = {}
+            _clear_pending()
 
     elif text == '/aproba_wp':
         if not pending_articol:
@@ -1175,6 +1203,7 @@ def webhook():
             except Exception as e:
                 tg_send(f"Eroare: {str(e)}")
             pending_articol = {}
+            _clear_pending()
 
     elif text.startswith('/adaug '):
         extra = text[7:].strip()
@@ -1222,6 +1251,7 @@ def webhook():
 
     elif text == '/respinge':
         pending_articol = {}
+        _clear_pending()
         tg_send("Articolul a fost respins.")
 
     elif text in ['/start', '/help']:
