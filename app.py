@@ -1144,6 +1144,98 @@ def publica_articol(titlu, continut, categorii=None, featured_media=None):
     res = r.json()
     return res.get('id'), res.get('link', '')
 
+def test_facebook_token():
+    """Verifica token-ul Facebook: validitate, pagina, permisiuni necesare."""
+    PERMISIUNI_NECESARE = ['pages_manage_posts', 'pages_read_engagement', 'pages_show_list']
+    if not FB_PAGE_TOKEN:
+        return "❌ <b>FB_PAGE_TOKEN</b> lipsește din variabilele de mediu Render."
+    if not FB_PAGE_ID:
+        return "❌ <b>FB_PAGE_ID</b> lipsește din variabilele de mediu Render."
+
+    lines = ["<b>🔍 Diagnostic token Facebook</b>\n"]
+
+    # 1. Verifică dacă token-ul e valid și ce pagină e
+    try:
+        r = requests.get(
+            f"https://graph.facebook.com/v20.0/me",
+            params={'access_token': FB_PAGE_TOKEN, 'fields': 'id,name'},
+            timeout=10
+        )
+        me = r.json()
+        if 'error' in me:
+            code = me['error'].get('code', '?')
+            msg  = me['error'].get('message', '')
+            lines.append(f"❌ Token invalid (#{code}): {msg}")
+            lines.append("\n<b>Soluție:</b> regenerează token-ul în Graph API Explorer cu permisiunile corecte.")
+            return '\n'.join(lines)
+        lines.append(f"✅ Token valid — pagina: <b>{me.get('name','?')}</b> (ID: {me.get('id','?')})")
+    except Exception as e:
+        lines.append(f"❌ Eroare rețea: {str(e)}")
+        return '\n'.join(lines)
+
+    # 2. Verifică permisiunile acordate
+    try:
+        r2 = requests.get(
+            f"https://graph.facebook.com/v20.0/me/permissions",
+            params={'access_token': FB_PAGE_TOKEN},
+            timeout=10
+        )
+        perms_data = r2.json().get('data', [])
+        granted = {p['permission'] for p in perms_data if p.get('status') == 'granted'}
+
+        lines.append("\n<b>Permisiuni necesare:</b>")
+        toate_ok = True
+        for p in PERMISIUNI_NECESARE:
+            if p in granted:
+                lines.append(f"  ✅ {p}")
+            else:
+                lines.append(f"  ❌ {p} — <b>LIPSEȘTE</b>")
+                toate_ok = False
+
+        if toate_ok:
+            lines.append("\n✅ <b>Toate permisiunile sunt OK!</b>")
+            # 3. Test post real (feed fără poză, sters imediat)
+            lines.append("\n<b>Test postare:</b> încerc un post de test...")
+            r3 = requests.post(
+                f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/feed",
+                data={
+                    'message': '🔧 Test bot parohial — mesaj de test, se șterge automat.',
+                    'access_token': FB_PAGE_TOKEN,
+                    'published': 'false',
+                },
+                timeout=15
+            )
+            res3 = r3.json()
+            if 'id' in res3:
+                post_id = res3['id']
+                lines.append(f"  ✅ Post creat cu succes (ID: {post_id})")
+                # Sterge postul de test
+                requests.delete(
+                    f"https://graph.facebook.com/v20.0/{post_id}",
+                    params={'access_token': FB_PAGE_TOKEN},
+                    timeout=10
+                )
+                lines.append("  🗑 Post de test șters automat.")
+                lines.append("\n🎉 <b>Facebook funcționează perfect!</b> Poți folosi /aproba_fb.")
+            else:
+                err = res3.get('error', {})
+                lines.append(f"  ❌ Eroare postare (#{err.get('code','?')}): {err.get('message','')}")
+        else:
+            lines.append(
+                "\n<b>Soluție:</b>\n"
+                "1. Mergi la developers.facebook.com/tools/explorer\n"
+                "2. Selectează aplicația ta\n"
+                "3. Bifează permisiunile marcate cu ❌ de mai sus\n"
+                "4. Click <b>Get Page Access Token</b> → alege pagina\n"
+                "5. Extinde token-ul (butonul ℹ → Extend Access Token)\n"
+                "6. Actualizează <code>FB_PAGE_TOKEN</code> în Render → Environment"
+            )
+    except Exception as e:
+        lines.append(f"❌ Eroare verificare permisiuni: {str(e)}")
+
+    return '\n'.join(lines)
+
+
 def publica_facebook(text, link='', img_bytes=None, img_url=None):
     """Posteaza direct pe pagina de Facebook prin Graph API."""
     if not FB_PAGE_TOKEN or not FB_PAGE_ID:
@@ -2154,6 +2246,16 @@ def webhook():
         _clear_pending()
         tg_send("Articolul a fost respins.")
 
+    elif text == '/test_fb':
+        tg_send("🔍 Verific token-ul Facebook...")
+        def _run_test_fb():
+            try:
+                linie = test_facebook_token()
+                tg_send(linie)
+            except Exception as e:
+                tg_send(f"Eroare verificare FB: {str(e)}")
+        threading.Thread(target=_run_test_fb, daemon=True).start()
+
     elif text in ['/start', '/help']:
         tg_send(
             "<b>Bot Parohia Cetate 2 Sibiu</b>\n\n"
@@ -2164,7 +2266,8 @@ def webhook():
             "/aproba_wp - publica doar pe WordPress\n"
             "/adaug [text] - adauga gand personal\n"
             "/regenereaza - alt articol\n"
-            "/respinge - nu publica azi\n\n"
+            "/respinge - nu publica azi\n"
+            "/test_fb - verifică permisiunile token-ului Facebook\n\n"
             "<b>Trimiteti direct:</b>\n"
             "Fotografie - articol foto\n"
             "Mesaj vocal/audio - articol audio\n"
