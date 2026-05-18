@@ -75,6 +75,57 @@ Parohia Cetate 2 Sibiu, Mitropolia Ardealului</p>
 """
 
 # ============================================================
+#  EXPRESII INTERZISE in textul pastoral
+# ============================================================
+EXPRESII_INTERZISE = [
+    'energie pozitiva', 'energie pozitivă', 'vibratii', 'vibrații',
+    'universul ne trimite', 'universul ne', 'zi speciala', 'zi specială',
+    'spiritualitate', 'karma', 'destinul ne invata', 'destinul ne învață',
+    'destin', 'spirit liber', 'mindfulness', 'meditatie transcendentala',
+    'energii', 'univers', 'lege a atractiei', 'legea atracției',
+]
+
+def _contine_expresii_interzise(text):
+    """Returneaza lista de expresii interzise gasite in text."""
+    tl = text.lower()
+    return [e for e in EXPRESII_INTERZISE if e in tl]
+
+# ============================================================
+#  ISTORIC POSTARI
+# ============================================================
+ISTORIC_FILE = '/tmp/istoric_postari.json'
+
+def _load_istoric():
+    try:
+        with open(ISTORIC_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except:
+        return []
+
+def _append_to_istoric(entry):
+    try:
+        lst = _load_istoric()
+        lst.append(entry)
+        lst = lst[-200:]  # pastram ultimele 200
+        with open(ISTORIC_FILE, 'w', encoding='utf-8') as f:
+            json.dump(lst, f, ensure_ascii=False, indent=2)
+    except:
+        pass
+
+def _update_istoric_status(data_str, status):
+    """Actualizeaza statusul ultimei intrari din ziua data."""
+    try:
+        lst = _load_istoric()
+        for entry in reversed(lst):
+            if entry.get('data') == data_str:
+                entry['status'] = status
+                break
+        with open(ISTORIC_FILE, 'w', encoding='utf-8') as f:
+            json.dump(lst, f, ensure_ascii=False, indent=2)
+    except:
+        pass
+
+# ============================================================
 #  AN OMAGIAL
 # ============================================================
 _an_omagial_cache = {}
@@ -369,14 +420,59 @@ def get_nume_post(dt):
     return "Postul"
 
 # ============================================================
-#  BIBLIA ORTODOXA - ID-uri carti (bibliaortodoxa.ro)
+#  BIBLIA ORTODOXA - ID-uri carti verificate (bibliaortodoxa.ro)
 # ============================================================
 BIBLIA_BOOK_IDS = {
-    'matei': 55, 'marcu': 53, 'luca': 48, 'ioan': 35, 'fapte': 26,
-    'romani': 70, '1 corinteni': 12, '2 corinteni': 13,
-    'galateni': 29, 'efeseni': 19, 'filipeni': 28, 'coloseni': 10, 'evrei': 22,
-    'psalmi': 65, 'psalm': 65, 'pilde': 63, 'facerea': 25, 'geneza': 25,
-    'isaia': 30, 'ieremia': 34, 'iezechiel': 20, 'daniel': 14,
+    # Vechiul Testament
+    'facerea': 25, 'geneza': 25,
+    'iesirea': 32, 'exodul': 32, 'exod': 32,
+    'leviticul': 47, 'levitic': 47,
+    'numerii': 59,
+    'deuteronomul': 17, 'deuteronom': 17,
+    'iosua': 41, 'iosua navi': 41,
+    'judecatori': 46,
+    'rut': 71,
+    '1 regi': 66, 'i regi': 66,
+    '2 regi': 67, 'ii regi': 67,
+    '3 regi': 68, 'iii regi': 68,
+    '4 regi': 69, 'iv regi': 69,
+    'psalmi': 65, 'psalm': 65, 'psalmul': 65,
+    'pilde': 63, 'proverbe': 63,
+    'ecclesiastul': 18, 'ecclesiast': 18,
+    'cantarea cantarilor': 9, 'cantari': 9,
+    'isaia': 43,
+    'ieremia': 31,
+    'plangeri': 64,
+    'iezechiel': 33, 'ezechiel': 33,
+    'daniel': 16,
+    # Noul Testament
+    'matei': 55,
+    'marcu': 53,
+    'luca': 48,
+    'ioan': 35,
+    'faptele apostolilor': 26, 'faptele': 26, 'fapte': 26,
+    'romani': 70,
+    '1 corinteni': 12, 'i corinteni': 12,
+    '2 corinteni': 13, 'ii corinteni': 13,
+    'galateni': 29,
+    'efeseni': 19,
+    'filipeni': 28,
+    'coloseni': 10,
+    '1 tesaloniceni': 76, 'i tesaloniceni': 76,
+    '2 tesaloniceni': 77, 'ii tesaloniceni': 77,
+    '1 timotei': 78, 'i timotei': 78,
+    '2 timotei': 79, 'ii timotei': 79,
+    'tit': 80,
+    'filimon': 27,
+    'evrei': 22,
+    'iacov': 30,
+    '1 petru': 61, 'i petru': 61,
+    '2 petru': 62, 'ii petru': 62,
+    '1 ioan': 36, 'i ioan': 36,
+    '2 ioan': 37, 'ii ioan': 37,
+    '3 ioan': 38, 'iii ioan': 38,
+    'iuda': 44,
+    'apocalipsa': 4,
 }
 
 # ============================================================
@@ -390,6 +486,7 @@ def new_zi_data(dt):
         'gospel':  {'reference': '', 'text': ''},
         'selected_verse': {'reference': '', 'text': '', 'source_url': '', 'verified': False},
         'pastoral_reflection': '',
+        'pastoral_variants': {},
         'sources': {
             'doxologia': 'https://doxologia.ro/calendar-ortodox',
             'biblia_ortodoxa': 'https://www.bibliaortodoxa.ro',
@@ -459,64 +556,145 @@ def fetch_doxologia_calendar(dt):
         zi_data['warnings'].append(f'Eroare doxologia.ro: {str(e)[:80]}')
     return zi_data
 
-def _parse_biblia_reference(ref):
-    """Parseaza referinta biblica; returneaza (book_id, chapter, v_start, v_end)."""
-    ref = re.sub(r'^(?:Ap\.?\s*|Ev\.?\s*|Apostolul?\s*|Evanghelia?\s*)', '', ref.strip(), flags=re.IGNORECASE)
-    m = re.match(
-        r'^([1-3]?\s*[A-Za-zÀ-žăâîșțĂÂÎȘȚ\s]+?)\s+(\d+)'
-        r'(?:[,\s]+(\d+)(?:\s*[-–]\s*(\d+))?)?',
-        ref
-    )
-    if not m:
-        return None, None, None, None
-    book_raw  = m.group(1).strip().lower()
-    chapter   = int(m.group(2))
-    v_start   = int(m.group(3)) if m.group(3) else None
-    v_end     = int(m.group(4)) if m.group(4) else v_start
-    book_id   = None
+def _normalize_biblia_ref(ref):
+    """Elimina prefixele liturgice din referinta biblica."""
+    ref = ref.strip()
+    ref = re.sub(
+        r'^(?:Apostolul\s*|Apostol\s*|Ap\.\s*|Evanghelia\s*|Evanghelie\s*|Ev\.\s*)',
+        '', ref, flags=re.IGNORECASE
+    ).strip()
+    return ref
+
+def _lookup_book(book_raw):
+    """Cauta book_id dupa numele cartii. Returneaza (book_id, key_matched)."""
+    book_lower = book_raw.lower().strip()
+    if book_lower in BIBLIA_BOOK_IDS:
+        return BIBLIA_BOOK_IDS[book_lower], book_lower
+    # Potrivire partiala: cel mai lung key care se potriveste castiga
+    best_key, best_id = '', None
     for key, bid in BIBLIA_BOOK_IDS.items():
-        if key in book_raw or book_raw in key:
-            book_id = bid
-            break
-    return book_id, chapter, v_start, v_end
+        if (key in book_lower or book_lower in key) and len(key) > len(best_key):
+            best_key, best_id = key, bid
+    return best_id, best_key or None
+
+def _split_multi_chapter_ref(norm_ref):
+    """
+    Parseaza referinte simple si multi-capitol (separate prin ";").
+    Exemplu: "Fapte 8, 40; 9, 1-19"
+    Returneaza (lista_segmente, eroare_string).
+    Fiecare segment: (book_id, book_name, chapter, v_start, v_end).
+    """
+    m = re.match(r'^([1-3]?\s*[A-Za-zÀ-žăâîșțĂÂÎȘȚ\s]+?)\s+(\d+.*)', norm_ref)
+    if not m:
+        return None, f"Formatul referintei nu a fost recunoscut: '{norm_ref}'"
+    book_raw = m.group(1).strip()
+    rest     = m.group(2).strip()
+
+    book_id, book_key = _lookup_book(book_raw)
+    if not book_id:
+        return None, f"Cartea '{book_raw}' nu a fost gasita in dictionar"
+
+    segments = []
+    for seg in rest.split(';'):
+        seg = seg.strip()
+        sm = re.match(r'(\d+)(?:\s*[,\s]\s*(\d+)(?:\s*[-–]\s*(\d+))?)?', seg)
+        if sm:
+            chap  = int(sm.group(1))
+            vs    = int(sm.group(2)) if sm.group(2) else None
+            ve    = int(sm.group(3)) if sm.group(3) else vs
+            segments.append((book_id, book_raw, chap, vs, ve))
+
+    if not segments:
+        return None, f"Niciun segment valid in '{rest}'"
+    return segments, None
 
 def fetch_biblia_ortodoxa_verse(reference):
-    """Preia versetul exact de pe bibliaortodoxa.ro (carte.php?cap=&id=)."""
+    """Preia versete de pe bibliaortodoxa.ro cu suport multi-capitol si debug."""
+    debug = {
+        'ref_received':   reference,
+        'ref_normalized': '',
+        'book_detected':  '',
+        'segments':       [],
+        'urls_accessed':  [],
+        'verses_found':   0,
+        'reason_failure': '',
+    }
+
     if not reference:
-        return {'reference': reference, 'text': '', 'source_url': '', 'verified': False}
-    book_id, chapter, v_start, v_end = _parse_biblia_reference(reference)
-    if not book_id or not chapter:
-        return {'reference': reference, 'text': '', 'source_url': '', 'verified': False}
-    url = f'https://www.bibliaortodoxa.ro/carte.php?cap={chapter}&id={book_id}'
-    try:
-        h = {'User-Agent': 'Mozilla/5.0'}
-        r = requests.get(url, headers=h, timeout=12)
-        if r.status_code != 200:
-            return {'reference': reference, 'text': '', 'source_url': url, 'verified': False}
-        # Versete: <tr id=versetN> cu textul in al doilea <td>
-        versete = re.findall(
-            r'<tr[^>]*id=verset(\d+)[^>]*>[\s\S]*?<td[^>]*>[\s\S]*?</td>\s*<td>([\s\S]*?)</td>\s*</tr>',
-            r.text
-        )
-        if not versete:
-            return {'reference': reference, 'text': '', 'source_url': url, 'verified': False}
-        vs = v_start or 1
-        ve = v_end or vs
-        collected = []
-        for vnum, vtext in versete:
-            n = int(vnum)
-            if vs <= n <= ve:
-                clean = re.sub(r'<[^>]+>', '', vtext).strip()
-                clean = re.sub(r'\s+', ' ', clean)
-                if clean:
-                    collected.append(clean)
-        if not collected:
-            clean = re.sub(r'<[^>]+>', '', versete[0][1]).strip()
-            collected = [re.sub(r'\s+', ' ', clean)[:300]]
-        text = ' '.join(collected)[:500]
-        return {'reference': reference, 'text': text, 'source_url': url, 'verified': bool(text)}
-    except Exception:
-        return {'reference': reference, 'text': '', 'source_url': url, 'verified': False}
+        debug['reason_failure'] = 'Referinta goala'
+        return {
+            'reference': reference, 'text': '', 'source_url': '', 'verified': False,
+            'warning': 'Nu s-a putut verifica automat textul biblic pe bibliaortodoxa.ro',
+            'debug': debug,
+        }
+
+    norm = _normalize_biblia_ref(reference)
+    debug['ref_normalized'] = norm
+
+    segments, err = _split_multi_chapter_ref(norm)
+    if not segments:
+        debug['reason_failure'] = err or 'Parsare esuata'
+        return {
+            'reference': reference, 'text': '', 'source_url': '', 'verified': False,
+            'warning': 'Nu s-a putut verifica automat textul biblic pe bibliaortodoxa.ro',
+            'debug': debug,
+        }
+
+    debug['book_detected'] = segments[0][1]
+    debug['segments'] = [
+        {'chapter': s[2], 'v_start': s[3], 'v_end': s[4]} for s in segments
+    ]
+
+    all_verses = []
+    last_url = ''
+    for book_id, book_name, chapter, v_start, v_end in segments:
+        url = f'https://www.bibliaortodoxa.ro/carte.php?cap={chapter}&id={book_id}'
+        last_url = url
+        debug['urls_accessed'].append(url)
+        try:
+            h = {'User-Agent': 'Mozilla/5.0'}
+            r = requests.get(url, headers=h, timeout=12)
+            if r.status_code != 200:
+                debug['reason_failure'] += f'HTTP {r.status_code} la cap={chapter}; '
+                continue
+            versete = re.findall(
+                r'<tr[^>]*id=verset(\d+)[^>]*>[\s\S]*?<td[^>]*>[\s\S]*?</td>\s*<td>([\s\S]*?)</td>\s*</tr>',
+                r.text
+            )
+            if not versete:
+                debug['reason_failure'] += f'Niciun <tr id=versetN> la cap={chapter}; '
+                continue
+            vs = v_start if v_start is not None else 1
+            ve = v_end   if v_end   is not None else 9999
+            for vnum, vtext in versete:
+                n = int(vnum)
+                if vs <= n <= ve:
+                    clean = re.sub(r'<[^>]+>', '', vtext).strip()
+                    clean = re.sub(r'\s+', ' ', clean)
+                    if clean:
+                        all_verses.append(clean)
+        except Exception as e:
+            debug['reason_failure'] += f'Exceptie cap={chapter}: {str(e)[:60]}; '
+
+    debug['verses_found'] = len(all_verses)
+
+    if not all_verses:
+        if not debug['reason_failure']:
+            debug['reason_failure'] = 'Versetele cerute nu au fost gasite in pagina'
+        return {
+            'reference': reference, 'text': '', 'source_url': last_url, 'verified': False,
+            'warning': 'Nu s-a putut verifica automat textul biblic pe bibliaortodoxa.ro',
+            'debug': debug,
+        }
+
+    text = ' '.join(all_verses)[:800]
+    return {
+        'reference': reference,
+        'text': text,
+        'source_url': last_url,
+        'verified': True,
+        'debug': debug,
+    }
 
 def scrape_pilde_solomon():
     """Fallback: Capitol din Pilde si Intelepciunea lui Solomon"""
@@ -537,58 +715,93 @@ def scrape_pilde_solomon():
     ]
     return random.choice(pilde), random.choice(solomon)
 
+WIKIMEDIA_IMAGINI = {
+    'craciun':   'https://upload.wikimedia.org/wikipedia/commons/8/8c/Nativity_icon_Sinai_12th_century.jpg',
+    'paste':     'https://upload.wikimedia.org/wikipedia/commons/b/b4/The_Resurrection_icon_%28Greek%2C_16th_c%29.jpg',
+    'florii':    'https://upload.wikimedia.org/wikipedia/commons/b/b2/Entry_into_Jerusalem_%28Pskov%2C_16c%29.jpg',
+    'boboteaza': 'https://upload.wikimedia.org/wikipedia/commons/a/a5/Theophany_icon_%28Yaroslavl%2C_17th_c.%29.jpg',
+    'post':      'https://upload.wikimedia.org/wikipedia/commons/5/5b/Christ_in_the_Wilderness_-_Ivan_Kramskoy_-_1872.jpg',
+    'maica':     'https://upload.wikimedia.org/wikipedia/commons/1/1b/Theotokos_of_Vladimir.jpg',
+    'cruce':     'https://upload.wikimedia.org/wikipedia/commons/1/17/Crucifixion_icon_sinai_10c.jpg',
+    'nicolae':   'https://upload.wikimedia.org/wikipedia/commons/0/04/Saint_Nicholas_icon_%28Lipnya_church%2C_Novgorod%29.jpg',
+    'schimbare': 'https://upload.wikimedia.org/wikipedia/commons/3/38/Transfiguration_by_Feofan_Grek.jpg',
+    'inaltare':  'https://upload.wikimedia.org/wikipedia/commons/4/46/Ascension_icon_%28Yaroslavl%2C_16th_c%29.jpg',
+    'default':   'https://upload.wikimedia.org/wikipedia/commons/d/d9/Christ_Pantocrator_mosaic_from_Hagia_Sophia.jpg',
+}
+
+def _verify_image_url(url, timeout=6):
+    """Verifica daca URL-ul imaginii este accesibil. Returneaza (ok, status_code)."""
+    try:
+        r = requests.head(url, timeout=timeout,
+                          headers={'User-Agent': 'Mozilla/5.0'},
+                          allow_redirects=True)
+        return r.status_code == 200, r.status_code
+    except Exception as e:
+        return False, str(e)[:60]
+
 def get_imagine_doxologia(query=''):
     """Incearca sa ia imagine reala de pe doxologia.ro"""
     try:
-        h = {'User-Agent':'Mozilla/5.0'}
-        # Incearca pagina calendarului
+        h = {'User-Agent': 'Mozilla/5.0'}
         r = requests.get('https://doxologia.ro/calendar-ortodox', headers=h, timeout=10)
-        # Cauta imagini cu dimensiuni rezonabile
         imgs = re.findall(
             r'<img[^>]+src=["\']([^"\']*(?:doxologia\.ro|basilica\.ro)[^"\']*\.jpg)["\']',
             r.text
         )
-        # Filtrare imagini mici (avatare etc.)
         for img in imgs:
             if 'icon' not in img.lower() and 'logo' not in img.lower() and 'thumb' not in img.lower():
-                # Verifica ca exista
-                try:
-                    ir = requests.head(img, timeout=5)
-                    if ir.status_code == 200:
-                        return img
-                except:
-                    pass
+                ok, _ = _verify_image_url(img)
+                if ok:
+                    return img
     except:
         pass
-    return get_imagine_fallback(query)
+    return None
 
 def get_imagine_fallback(query=''):
-    # Upload direct Wikimedia - fara thumb, fara redirect, referrerpolicy=no-referrer in HTML
-    imagini = {
-        'craciun':   'https://upload.wikimedia.org/wikipedia/commons/8/8c/Nativity_icon_Sinai_12th_century.jpg',
-        'paste':     'https://upload.wikimedia.org/wikipedia/commons/b/b4/The_Resurrection_icon_%28Greek%2C_16th_c%29.jpg',
-        'florii':    'https://upload.wikimedia.org/wikipedia/commons/b/b2/Entry_into_Jerusalem_%28Pskov%2C_16c%29.jpg',
-        'boboteaza': 'https://upload.wikimedia.org/wikipedia/commons/a/a5/Theophany_icon_%28Yaroslavl%2C_17th_c.%29.jpg',
-        'post':      'https://upload.wikimedia.org/wikipedia/commons/5/5b/Christ_in_the_Wilderness_-_Ivan_Kramskoy_-_1872.jpg',
-        'maica':     'https://upload.wikimedia.org/wikipedia/commons/1/1b/Theotokos_of_Vladimir.jpg',
-        'cruce':     'https://upload.wikimedia.org/wikipedia/commons/1/17/Crucifixion_icon_sinai_10c.jpg',
-        'nicolae':   'https://upload.wikimedia.org/wikipedia/commons/0/04/Saint_Nicholas_icon_%28Lipnya_church%2C_Novgorod%29.jpg',
-        'schimbare': 'https://upload.wikimedia.org/wikipedia/commons/3/38/Transfiguration_by_Feofan_Grek.jpg',
-        'inaltare':  'https://upload.wikimedia.org/wikipedia/commons/4/46/Ascension_icon_%28Yaroslavl%2C_16th_c%29.jpg',
-        'duminica':  'https://upload.wikimedia.org/wikipedia/commons/d/d9/Christ_Pantocrator_mosaic_from_Hagia_Sophia.jpg',
-        'default':   'https://upload.wikimedia.org/wikipedia/commons/d/d9/Christ_Pantocrator_mosaic_from_Hagia_Sophia.jpg',
-    }
+    """Selecteaza URL Wikimedia dupa cuvant-cheie (fara verificare)."""
     q = query.lower()
-    for k, v in imagini.items():
+    for k, v in WIKIMEDIA_IMAGINI.items():
         if k in q:
             return v
-    return imagini['default']
+    return WIKIMEDIA_IMAGINI['default']
 
-def get_imagine(tip='', query=''):
-    img = get_imagine_doxologia(query + ' ' + tip)
-    if not img:
-        img = get_imagine_fallback(tip + ' ' + query)
-    return img
+def get_imagine_with_status(query='', base_url=''):
+    """
+    Returneaza un dict cu URL final si stare verificare:
+    {url, verified, fallback_used, tried_url, status_code, is_local}
+    """
+    local_static = (base_url.rstrip('/') + '/static/images/calendar-ortodox-default.jpg'
+                    if base_url else '/static/images/calendar-ortodox-default.jpg')
+
+    # 1. Incearca doxologia
+    dox_url = get_imagine_doxologia(query)
+    if dox_url:
+        return {
+            'url': dox_url, 'verified': True,
+            'fallback_used': False, 'tried_url': dox_url,
+            'status_code': 200, 'is_local': False,
+        }
+
+    # 2. Wikimedia fallback cu verificare
+    wiki_url = get_imagine_fallback(query)
+    ok, code = _verify_image_url(wiki_url)
+    if ok:
+        return {
+            'url': wiki_url, 'verified': True,
+            'fallback_used': True, 'tried_url': wiki_url,
+            'status_code': code, 'is_local': False,
+        }
+
+    # 3. Local static fallback (intotdeauna disponibil)
+    return {
+        'url': local_static, 'verified': True,
+        'fallback_used': True, 'tried_url': wiki_url,
+        'status_code': code, 'is_local': True,
+    }
+
+def get_imagine(tip='', query='', base_url=''):
+    result = get_imagine_with_status(query + ' ' + tip, base_url)
+    return result['url']
 
 # ============================================================
 #  PIPELINE POST - validare, reflectie, constructie FB/TG
@@ -605,32 +818,89 @@ def validate_post_data(zi_data):
         zi_data['warnings'].append('⚠ Versetul nu a putut fi verificat pe bibliaortodoxa.ro')
     return zi_data
 
-def generate_pastoral_reflection(zi_data):
-    """AI genereaza DOAR reflectia pastorala: 3-6 fraze calde, concrete."""
+def _make_zi_context(zi_data):
     saints_str = ', '.join(zi_data['saints']) if zi_data['saints'] else 'Sfintii zilei'
-    ap_ref  = zi_data['apostle'].get('reference', '')
-    ev_ref  = zi_data['gospel'].get('reference', '')
-    v_ref   = zi_data['selected_verse'].get('reference', '')
-    v_text  = zi_data['selected_verse'].get('text', '')
-    u = (
+    ap_ref = zi_data['apostle'].get('reference', '')
+    ev_ref = zi_data['gospel'].get('reference', '')
+    v_ref  = zi_data['selected_verse'].get('reference', '')
+    v_text = zi_data['selected_verse'].get('text', '')
+    ctx = (
         f"Sfintii zilei: {saints_str}.\n"
         f"Apostolul: {ap_ref}.\n"
         f"Evanghelia: {ev_ref}.\n"
-        + (f'Verset ales: {v_ref} — \"{v_text}\"\n' if v_text else '')
-        + "\nScrie EXCLUSIV 3-6 fraze pastorale calde, concrete, umane. "
-        "Tonul: ca Pr. Constantin Necula — aproape de om, cu caldura. "
-        "NU inventa citate patristice. NU adauga titluri, hashtag-uri sau alte sectiuni. "
-        "Raspunde DOAR cu cele 3-6 fraze."
     )
-    try:
-        sys_refl = (
-            "Esti un preot ortodox care scrie reflectii pastorale scurte, calde si concrete. "
-            "Scrie natural, fara clisee. Nu inventa citate. "
-            "Raspunde DOAR cu cele 3-6 fraze cerute, fara titluri, fara alte sectiuni."
-        )
-        return call_claude(sys_refl, u, 600).strip()
-    except Exception:
-        return ''
+    if v_text:
+        ctx += f'Verset ales: {v_ref} — \"{v_text}\"\n'
+    return ctx
+
+SYS_PASTORAL = (
+    "Esti un preot ortodox roman care scrie reflectii pastorale scurte, calde, sobru. "
+    "Tonul tau este ca al Parintelui Constantin Necula — aproape de om, concret, fara academism. "
+    "NU inventa citate patristice. NU folosi expresii ca: energie pozitiva, vibratii, "
+    "universul ne trimite, spiritualitate, karma, destin, zi speciala, mindfulness, energii. "
+    "Raspunde STRICT cu textul cerut, fara titluri, fara numerotare, fara hashtag-uri."
+)
+
+def generate_pastoral_reflection(zi_data):
+    """Returneaza o singura reflectie pastorala (3-6 fraze). Retried daca contine expresii interzise."""
+    ctx = _make_zi_context(zi_data)
+    prompt = (
+        ctx
+        + "\nScrie 3-6 fraze pastorale calde, concrete, umane. "
+        "Fara titluri. Fara hashtag-uri. Fara citate patristice inventate."
+    )
+    for _ in range(3):
+        try:
+            text = call_claude(SYS_PASTORAL, prompt, 600).strip()
+            bad = _contine_expresii_interzise(text)
+            if not bad:
+                return text
+            prompt = (
+                ctx
+                + f"\nATENTIE: textul anterior contine expresii interzise ({', '.join(bad)}). "
+                "Rescrie fara aceste expresii. Pastreaza tonul ortodox, cald, sobru. 3-6 fraze."
+            )
+        except Exception:
+            break
+    return ''
+
+def generate_pastoral_variants(zi_data):
+    """Genereaza 3 variante de Cuvant de folos cu stiluri diferite.
+    Returneaza {'scurt': ..., 'duhovnicesc': ..., 'catehetic': ...}
+    """
+    ctx = _make_zi_context(zi_data)
+    styles = {
+        'scurt': (
+            ctx
+            + "\nScrie o reflectie SCURTA si CALDA — 2-3 fraze simple, directe, aproape de om. "
+            "Fara titluri."
+        ),
+        'duhovnicesc': (
+            ctx
+            + "\nScrie o reflectie DUHOVNICEASCA — 3-5 fraze cu profunzime ortodoxa, "
+            "referire la Evanghelie si invitatie la rugaciune. Fara titluri."
+        ),
+        'catehetic': (
+            ctx
+            + "\nScrie o reflectie CATEHETICA — 3-5 fraze cu explicatie clara a lectiei zilei, "
+            "potrivita pentru familia crestina si tineri. Fara titluri."
+        ),
+    }
+    results = {}
+    for key, prompt in styles.items():
+        for _ in range(2):
+            try:
+                text = call_claude(SYS_PASTORAL, prompt, 600).strip()
+                bad = _contine_expresii_interzise(text)
+                if not bad:
+                    results[key] = text
+                    break
+                prompt += f"\nATENTIE: evita expresiile ({', '.join(bad)})."
+            except Exception:
+                break
+        if key not in results:
+            results[key] = ''
+    return results
 
 def build_facebook_post(zi_data):
     """Construieste postarea FB structurata cu emoji-uri, conform formatului pastoral."""
@@ -657,7 +927,7 @@ def build_facebook_post(zi_data):
     return '\n\n'.join(parts)
 
 def build_telegram_preview(zi_data, titlu_wp=''):
-    """Preview Telegram cu surse verificate si avertismente."""
+    """Preview Telegram cu surse verificate, 3 variante cuvant de folos si avertismente."""
     saints_str = ', '.join(zi_data['saints']) if zi_data['saints'] else '—'
     ap_ref  = zi_data['apostle'].get('reference', '—')
     ev_ref  = zi_data['gospel'].get('reference', '—')
@@ -665,6 +935,7 @@ def build_telegram_preview(zi_data, titlu_wp=''):
     v_ok    = zi_data['selected_verse'].get('verified', False)
     v_url   = zi_data['selected_verse'].get('source_url', '')
     warnings = zi_data.get('warnings', [])
+    variants = zi_data.get('pastoral_variants', {})
 
     lines = ['<b>ARTICOL GENERAT</b>']
     if titlu_wp:
@@ -677,10 +948,24 @@ def build_telegram_preview(zi_data, titlu_wp=''):
         lines.append(f'<b>Evanghelia:</b> {ev_ref}')
     if v_ref:
         icon = '✓' if v_ok else '⚠'
-        if v_url:
+        if not v_ok:
+            lines.append(f'<b>Verset ({icon}):</b> {v_ref}')
+            lines.append('<i>⚠ Facebook nu va fi publicat fara verset verificat.</i>')
+        elif v_url:
             lines.append(f'<b>Verset ({icon}):</b> <a href="{v_url}">{v_ref}</a>')
         else:
             lines.append(f'<b>Verset ({icon}):</b> {v_ref}')
+
+    # 3 variante cuvant de folos
+    if variants:
+        lines.append('')
+        lines.append('<b>💬 Cuvânt de folos — 3 variante:</b>')
+        labels = {'scurt': '1️⃣ Scurt și cald', 'duhovnicesc': '2️⃣ Duhovnicesc', 'catehetic': '3️⃣ Catehetic'}
+        for key, label in labels.items():
+            txt = variants.get(key, '')
+            if txt:
+                lines.append(f'\n<b>{label}:</b>\n{txt}')
+
     lines.append('')
     lines.append(
         '📚 Surse: <a href="https://doxologia.ro/calendar-ortodox">Doxologia</a> | '
@@ -692,16 +977,24 @@ def build_telegram_preview(zi_data, titlu_wp=''):
         for w in warnings:
             lines.append(f'  {w}')
     lines.append('')
-    lines.append('<b>Raspunde cu:</b>')
-    lines.append('/aproba - WP + Facebook')
-    lines.append('/aproba_fb - doar Facebook')
-    lines.append('/aproba_wp - doar WordPress')
-    lines.append('/adaug [text] - adauga gand personal')
-    lines.append('/editeaza_fb - editeaza textul Facebook')
-    lines.append('/editeaza_wp - editeaza titlul si continutul WordPress')
-    lines.append('/regenereaza - genereaza alt articol')
-    lines.append('/respinge - nu publica azi')
+    lines.append('<b>Comenzi:</b>')
+    lines.append('/aproba — WP + Facebook')
+    lines.append('/aproba_fb — doar Facebook')
+    lines.append('/aproba_wp — doar WordPress')
+    lines.append('/adaug [text] — adaugă gând personal')
+    lines.append('/regenereaza_cuvant — regenerează cuvântul de folos')
+    lines.append('/editeaza_fb — editează textul Facebook')
+    lines.append('/editeaza_wp — editează titlul și conținutul WP')
+    lines.append('/regenereaza — articol nou complet')
+    lines.append('/respinge — nu publica azi')
     return '\n'.join(lines)
+
+def _get_inline_keyboard_cuvant():
+    return {
+        'inline_keyboard': [[
+            {'text': '🔁 Regenerează cuvântul de folos', 'callback_data': 'regen_cuvant'}
+        ]]
+    }
 
 # ============================================================
 #  VIDEO RESURSE (Saptamana Mare)
@@ -786,17 +1079,19 @@ def publica_facebook(text, link='', img_bytes=None, img_url=None):
             if 'id' in res or 'post_id' in res:
                 return res.get('post_id') or res.get('id'), ''
             return None, res.get('error', {}).get('message', str(res))
-        # Cu poza din URL
+        # Cu poza din URL (verificam inainte ca FB sa o respinga)
         if img_url:
-            r = requests.post(
-                f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/photos",
-                data={'caption': text, 'url': img_url, 'access_token': FB_PAGE_TOKEN},
-                timeout=30
-            )
-            res = r.json()
-            if 'id' in res or 'post_id' in res:
-                return res.get('post_id') or res.get('id'), ''
-            # Daca esueaza cu URL, fallback la text cu link
+            img_ok, _ = _verify_image_url(img_url)
+            if img_ok:
+                r = requests.post(
+                    f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/photos",
+                    data={'caption': text, 'url': img_url, 'access_token': FB_PAGE_TOKEN},
+                    timeout=30
+                )
+                res = r.json()
+                if 'id' in res or 'post_id' in res:
+                    return res.get('post_id') or res.get('id'), ''
+            # Daca imaginea nu e accesibila sau FB o respinge, fallback la text
         # Text simplu (cu sau fara link WP)
         payload = {'message': text, 'access_token': FB_PAGE_TOKEN}
         if link:
@@ -827,17 +1122,31 @@ def upload_media(data_bytes, filename, mime):
 # ============================================================
 #  TELEGRAM
 # ============================================================
-def tg_send(text, chat_id=None):
+def tg_send(text, chat_id=None, reply_markup=None):
     if not TG_TOKEN:
         return
     cid = chat_id or TG_CHAT_ID
     if not cid:
         return
     try:
+        payload = {'chat_id': cid, 'text': text, 'parse_mode': 'HTML'}
+        if reply_markup:
+            payload['reply_markup'] = reply_markup
         requests.post(
             f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-            json={'chat_id': cid, 'text': text, 'parse_mode': 'HTML'},
-            timeout=10
+            json=payload, timeout=10
+        )
+    except:
+        pass
+
+def tg_answer_callback(callback_query_id, text=''):
+    if not TG_TOKEN:
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TG_TOKEN}/answerCallbackQuery",
+            json={'callback_query_id': callback_query_id, 'text': text},
+            timeout=5
         )
     except:
         pass
@@ -860,11 +1169,26 @@ def trimite_spre_aprobare(articol):
     global pending_articol
     pending_articol = articol
     _save_pending(articol)
-    zi_data = articol.get('zi_data')
+
+    # Salveaza in istoric
+    zi_data = articol.get('zi_data', {})
+    _append_to_istoric({
+        'data':       articol.get('data_generare', datetime.datetime.now().strftime('%Y-%m-%d')),
+        'ora':        datetime.datetime.now().strftime('%H:%M'),
+        'sfinti':     zi_data.get('saints', []),
+        'apostol':    zi_data.get('apostle', {}).get('reference', ''),
+        'evanghelie': zi_data.get('gospel', {}).get('reference', ''),
+        'verset_ref': zi_data.get('selected_verse', {}).get('reference', ''),
+        'verset_text': zi_data.get('selected_verse', {}).get('text', ''),
+        'text_ales':  articol.get('fb_text', '')[:300],
+        'status':     'generat',
+        'surse':      zi_data.get('sources', {}),
+    })
+
     if zi_data:
         preview = build_telegram_preview(zi_data, articol.get('titlu_wp', ''))
+        keyboard = _get_inline_keyboard_cuvant()
     else:
-        # fallback pentru articole generate din poza/audio/text liber
         sfinti_link = ''
         if articol.get('sfinti_list'):
             sfinti_str = ', '.join(articol['sfinti_list'])
@@ -875,17 +1199,18 @@ def trimite_spre_aprobare(articol):
             f"{sfinti_link}\n\n"
             f"<b>Preview Facebook:</b>\n"
             f"{str(articol.get('fb_text',''))[:500]}...\n\n"
-            f"<b>Raspunde cu:</b>\n"
-            f"/aproba - WP + Facebook\n"
-            f"/aproba_fb - doar Facebook\n"
-            f"/aproba_wp - doar WordPress\n"
-            f"/adaug [text] - adauga gand personal\n"
-            f"/editeaza_fb - editeaza textul Facebook\n"
-            f"/editeaza_wp - editeaza titlul si continutul WordPress\n"
-            f"/regenereaza - genereaza alt articol\n"
-            f"/respinge - nu publica azi"
+            f"<b>Comenzi:</b>\n"
+            f"/aproba — WP + Facebook\n"
+            f"/aproba_fb — doar Facebook\n"
+            f"/aproba_wp — doar WordPress\n"
+            f"/adaug [text] — adaugă gând personal\n"
+            f"/editeaza_fb — editează textul Facebook\n"
+            f"/editeaza_wp — editează titlul și conținutul WP\n"
+            f"/regenereaza — articol nou complet\n"
+            f"/respinge — nu publica azi"
         )
-    tg_send(preview)
+        keyboard = None
+    tg_send(preview, reply_markup=keyboard)
 
 # ============================================================
 #  GROQ API
@@ -1101,9 +1426,13 @@ def genereaza_articol_zilnic(extra_text=''):
         autor_f2, citat_f2 = get_citat_familie()
         data['citat_familie'] = f'"{citat_f2}" — {autor_f2}'
 
-        # Imagine
+        # Imagine cu verificare si fallback local
         query = data.get('imagine_query', tip)
-        data['imagine_url'] = get_imagine(tip, query)
+        _base = request.host_url.rstrip('/') if request else ''
+        img_res = get_imagine_with_status(query + ' ' + tip, _base)
+        data['imagine_url'] = img_res['url']
+        if img_res['is_local']:
+            data.setdefault('warnings', []).append('Imaginea externa nu s-a incarcat - se foloseste imaginea locala default')
         data['publica_wp']  = True
 
         # === Pipeline ZiData ===
@@ -1112,8 +1441,14 @@ def genereaza_articol_zilnic(extra_text=''):
         if verse_ref:
             zi_data['selected_verse'] = fetch_biblia_ortodoxa_verse(verse_ref)
 
-        # 2. Reflectie pastorala (AI - exclusiv 3-6 fraze)
-        zi_data['pastoral_reflection'] = generate_pastoral_reflection(zi_data)
+        # 2. Reflectie pastorala: varianta principala + 3 variante pentru Telegram
+        zi_data['pastoral_variants'] = generate_pastoral_variants(zi_data)
+        # Varianta principala = cea scurta (sau prima disponibila)
+        zi_data['pastoral_reflection'] = (
+            zi_data['pastoral_variants'].get('scurt')
+            or zi_data['pastoral_variants'].get('duhovnicesc')
+            or generate_pastoral_reflection(zi_data)
+        )
 
         # 3. Validare
         zi_data = validate_post_data(zi_data)
@@ -1125,8 +1460,9 @@ def genereaza_articol_zilnic(extra_text=''):
             data['fb_text'] = fb_text_nou + f'\n\n✦ {autor_f2}:\n„{citat_f2}"'
         # Altfel pastreaza fb_text generat de AI
 
-        # 5. Salveaza zi_data in articol pentru preview si TG
+        # 5. Salveaza zi_data si metadata in articol
         data['zi_data'] = zi_data
+        data['data_generare'] = dt.strftime('%Y-%m-%d')
 
         trimite_spre_aprobare(data)
         return data
@@ -1389,6 +1725,38 @@ def webhook():
     if not update:
         return jsonify({'ok': True})
 
+    # Callback inline keyboard
+    cb = update.get('callback_query', {})
+    if cb:
+        cb_chat = str(cb.get('message', {}).get('chat', {}).get('id', ''))
+        cb_data = cb.get('data', '')
+        cb_id   = cb.get('id', '')
+        if cb_chat == TG_CHAT_ID and cb_data == 'regen_cuvant':
+            tg_answer_callback(cb_id, 'Regenerez...')
+            def _regen_cuvant_bg():
+                art = pending_articol
+                zi = art.get('zi_data')
+                if not zi:
+                    tg_send("Nu exista articol in asteptare pentru regenerare.")
+                    return
+                variants = generate_pastoral_variants(zi)
+                zi['pastoral_variants'] = variants
+                zi['pastoral_reflection'] = (
+                    variants.get('scurt') or variants.get('duhovnicesc') or ''
+                )
+                art['zi_data'] = zi
+                pending_articol.update({'zi_data': zi})
+                _save_pending(pending_articol)
+                lines = ['<b>🔁 Cuvânt de folos — variante noi:</b>']
+                labels = {'scurt': '1️⃣ Scurt și cald', 'duhovnicesc': '2️⃣ Duhovnicesc', 'catehetic': '3️⃣ Catehetic'}
+                for key, label in labels.items():
+                    txt = variants.get(key, '')
+                    if txt:
+                        lines.append(f'\n<b>{label}:</b>\n{txt}')
+                tg_send('\n'.join(lines), reply_markup=_get_inline_keyboard_cuvant())
+            threading.Thread(target=_regen_cuvant_bg, daemon=True).start()
+        return jsonify({'ok': True})
+
     msg     = update.get('message', {})
     chat_id = str(msg.get('chat', {}).get('id', ''))
 
@@ -1405,8 +1773,10 @@ def webhook():
             tg_send("Nu exista articol in asteptare.")
             return jsonify({'ok': True})
         art = pending_articol
+        art_date = art.get('data_generare', datetime.datetime.now().strftime('%Y-%m-%d'))
         try:
             media_id = None
+            img_warn = ''
 
             # Imagine
             if art.get('img_bytes'):
@@ -1419,8 +1789,10 @@ def webhook():
                     ir = requests.get(art['imagine_url'], timeout=10)
                     if ir.status_code == 200:
                         media_id, _ = upload_media(ir.content, 'foto.jpg', 'image/jpeg')
+                    else:
+                        img_warn = f'⚠ Imaginea ({art["imagine_url"][:60]}...) nu s-a incarcat. Postez fara imagine.'
                 except:
-                    pass
+                    img_warn = '⚠ Imaginea nu a putut fi descarcata. Postez fara imagine.'
 
             # Audio
             bloc_audio = ''
@@ -1437,34 +1809,46 @@ def webhook():
                 except:
                     pass
 
-            # Video bloc (Saptamana Mare)
             video_bloc = art.get('video_bloc', '')
-
             continut = (bloc_audio or '') + art.get('continut_wp', '') + (video_bloc or '')
             cat = art.get('categorii', [CAT_TRAIESTE])
 
             post_id, link = publica_articol(art['titlu_wp'], continut, cat, media_id)
 
             if link:
+                _update_istoric_status(art_date, 'publicat_wp')
                 fb_text = art.get('fb_text', '')
-                fb_id, fb_err = publica_facebook(fb_text, link)
-                if fb_id:
+                # Verifica verset: Facebook blocat daca versetul nu e verificat
+                verse_ok = art.get('zi_data', {}).get('selected_verse', {}).get('verified', True)
+                if not verse_ok:
                     tg_send(
                         f"✓ Publicat pe WordPress!\n{link}\n\n"
-                        f"✓ Publicat pe Facebook!"
-                    )
-                elif FB_PAGE_TOKEN and FB_PAGE_ID:
-                    tg_send(
-                        f"✓ Publicat pe WordPress!\n{link}\n\n"
-                        f"⚠ Facebook eroare: {fb_err}"
+                        f"⛔ Facebook BLOCAT — versetul biblic nu a fost verificat pe bibliaortodoxa.ro.\n"
+                        f"Verificați manual sau folosiți /aproba_fb după corectare."
+                        + (f'\n{img_warn}' if img_warn else '')
                     )
                 else:
-                    tg_send(
-                        f"✓ Publicat pe WordPress!\n{link}\n\n"
-                        f"(Facebook: seteaza FB_PAGE_TOKEN si FB_PAGE_ID pe Render)"
-                    )
+                    fb_id, fb_err = publica_facebook(fb_text, link)
+                    if fb_id:
+                        _update_istoric_status(art_date, 'publicat')
+                        tg_send(
+                            f"✓ Publicat pe WordPress!\n{link}\n\n"
+                            f"✓ Publicat pe Facebook!"
+                            + (f'\n{img_warn}' if img_warn else '')
+                        )
+                    elif FB_PAGE_TOKEN and FB_PAGE_ID:
+                        tg_send(
+                            f"✓ Publicat pe WordPress!\n{link}\n\n"
+                            f"⚠ Facebook eroare: {fb_err}"
+                            + (f'\n{img_warn}' if img_warn else '')
+                        )
+                    else:
+                        tg_send(
+                            f"✓ Publicat pe WordPress!\n{link}\n\n"
+                            f"(Facebook: seteaza FB_PAGE_TOKEN si FB_PAGE_ID pe Render)"
+                        )
             else:
-                tg_send("Eroare - verificati WordPress.")
+                tg_send("Eroare la publicarea pe WordPress.")
             pending_articol = {}
             _clear_pending()
 
@@ -1476,12 +1860,27 @@ def webhook():
             tg_send("Nu exista articol in asteptare.")
         else:
             art = pending_articol
+            art_date = art.get('data_generare', datetime.datetime.now().strftime('%Y-%m-%d'))
+            # Verifica verset
+            verse_ok = art.get('zi_data', {}).get('selected_verse', {}).get('verified', True)
+            if not verse_ok:
+                tg_send(
+                    "⛔ Facebook BLOCAT — versetul biblic nu a fost verificat pe bibliaortodoxa.ro.\n"
+                    "Verificați manual referința sau folosiți /respinge."
+                )
+                return jsonify({'ok': True})
             fb_text = art.get('fb_text', '')
             img_bytes = art.get('img_bytes')
             img_url = art.get('imagine_url') if not img_bytes else None
             fb_id, fb_err = publica_facebook(fb_text, img_bytes=img_bytes, img_url=img_url)
             if fb_id:
-                tg_send("✓ Publicat pe Facebook!")
+                _update_istoric_status(art_date, 'publicat_fb')
+                msg_ok = "✓ Publicat pe Facebook!"
+                if img_url and not img_bytes:
+                    img_ok, _ = _verify_image_url(img_url)
+                    if not img_ok:
+                        msg_ok += "\n⚠ Imaginea nu s-a incarcat — postare publicata fara imagine."
+                tg_send(msg_ok)
             else:
                 tg_send(f"⚠ Facebook eroare: {fb_err}")
             pending_articol = {}
@@ -1492,6 +1891,7 @@ def webhook():
             tg_send("Nu exista articol in asteptare.")
         else:
             art = pending_articol
+            art_date = art.get('data_generare', datetime.datetime.now().strftime('%Y-%m-%d'))
             try:
                 media_id = None
                 if art.get('img_bytes'):
@@ -1509,6 +1909,7 @@ def webhook():
                 continut = art.get('continut_wp', '') + art.get('video_bloc', '')
                 post_id, link = publica_articol(art['titlu_wp'], continut, art.get('categorii', [CAT_TRAIESTE]), media_id)
                 if link:
+                    _update_istoric_status(art_date, 'publicat_wp')
                     tg_send(f"✓ Publicat doar pe WordPress!\n{link}")
                 else:
                     tg_send("Eroare - verificati WordPress.")
@@ -1526,6 +1927,31 @@ def webhook():
             except:
                 pass
         threading.Thread(target=_trigger_adaug, daemon=True).start()
+
+    elif text == '/regenereaza_cuvant':
+        if not pending_articol:
+            tg_send("Nu exista articol in asteptare.")
+        else:
+            tg_send("Regenerez variantele cuvântului de folos... (20-40 sec)")
+            def _regen_cuvant_cmd():
+                art = pending_articol
+                zi = art.get('zi_data')
+                if not zi:
+                    tg_send("Articolul nu are zi_data — foloseste /regenereaza pentru articol nou complet.")
+                    return
+                variants = generate_pastoral_variants(zi)
+                zi['pastoral_variants'] = variants
+                zi['pastoral_reflection'] = variants.get('scurt') or variants.get('duhovnicesc') or ''
+                pending_articol['zi_data'] = zi
+                _save_pending(pending_articol)
+                lines = ['<b>🔁 Cuvânt de folos — variante noi:</b>']
+                labels = {'scurt': '1️⃣ Scurt și cald', 'duhovnicesc': '2️⃣ Duhovnicesc', 'catehetic': '3️⃣ Catehetic'}
+                for key, label in labels.items():
+                    txt = variants.get(key, '')
+                    if txt:
+                        lines.append(f'\n<b>{label}:</b>\n{txt}')
+                tg_send('\n'.join(lines), reply_markup=_get_inline_keyboard_cuvant())
+            threading.Thread(target=_regen_cuvant_cmd, daemon=True).start()
 
     elif text == '/regenereaza':
         tg_send("Generez articol nou...")
@@ -1562,6 +1988,8 @@ def webhook():
             )
 
     elif text == '/respinge':
+        art_date = pending_articol.get('data_generare', datetime.datetime.now().strftime('%Y-%m-%d'))
+        _update_istoric_status(art_date, 'respins')
         pending_articol = {}
         _clear_pending()
         tg_send("Articolul a fost respins.")
@@ -1806,8 +2234,12 @@ def ep_test():
         verse = fetch_biblia_ortodoxa_verse(verse_ref)
         t_verse = round(__import__('time').time() - t1, 2)
 
-    # 3. Imagine fallback
-    img_url = get_imagine_fallback()
+    # 3. Imagine cu verificare
+    base_url = request.host_url.rstrip('/')
+    t2 = __import__('time').time()
+    img_status = get_imagine_with_status('', base_url)
+    t_img = round(__import__('time').time() - t2, 2)
+    img_url = img_status['url']
 
     def row(label, value, ok=None):
         if ok is True:
@@ -1842,6 +2274,46 @@ def ep_test():
     verse_link = (f'<a href="{verse_url}" target="_blank" style="color:#8B0000;">'
                   f'{verse_ref}</a>') if verse_url else verse_ref
 
+    # Debug Biblia Ortodoxa
+    dbg = verse.get('debug', {})
+    dbg_rows = ''
+    if dbg:
+        def dbg_row(label, val):
+            val_s = str(val) if val else '—'
+            return (
+                f'<tr><td style="padding:5px 10px;font-size:11px;color:#888;'
+                f'white-space:nowrap;border-bottom:1px solid #f5f0f0;">{label}</td>'
+                f'<td style="padding:5px 10px;font-size:12px;color:#444;'
+                f'border-bottom:1px solid #f5f0f0;word-break:break-all;">{val_s}</td></tr>'
+            )
+        segs_str = '; '.join(
+            f"cap {s['chapter']} v{s['v_start'] or '?'}-{s['v_end'] or '?'}"
+            for s in dbg.get('segments', [])
+        )
+        urls_str = '<br>'.join(
+            f'<a href="{u}" target="_blank" style="color:#8B0000;">{u}</a>'
+            for u in dbg.get('urls_accessed', [])
+        )
+        dbg_rows = (
+            dbg_row('ref_received', dbg.get('ref_received'))
+            + dbg_row('ref_normalized', dbg.get('ref_normalized'))
+            + dbg_row('book_detected', dbg.get('book_detected'))
+            + dbg_row('segmente', segs_str or '—')
+            + dbg_row('url(uri) accesate', urls_str or '—')
+            + dbg_row('versete_gasite', dbg.get('verses_found'))
+            + dbg_row('motiv_esec', dbg.get('reason_failure') or '—')
+        )
+        dbg_section = (
+            f'<details style="margin-top:8px;">'
+            f'<summary style="font-size:12px;color:#888;cursor:pointer;">Debug detalii</summary>'
+            f'<table style="width:100%;border-collapse:collapse;margin-top:6px;">'
+            f'{dbg_rows}</table></details>'
+        )
+    else:
+        dbg_section = ''
+
+    verse_warning = verse.get('warning', '')
+
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1867,24 +2339,37 @@ def ep_test():
   2. Biblia Ortodoxa ({verse_link})
   <span style="font-weight:normal;color:#888;font-size:12px;">({t_verse}s)</span>
 </h3>
-<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:8px;
-  box-shadow:0 1px 6px rgba(0,0,0,.07);margin-bottom:20px;overflow:hidden;">
+<div style="background:#fff;border-radius:8px;box-shadow:0 1px 6px rgba(0,0,0,.07);
+  margin-bottom:20px;overflow:hidden;">
+<table style="width:100%;border-collapse:collapse;">
   {row('Referinta', verse_ref, bool(verse_ref))}
   {row('Text verset', verse_text[:200] + ('…' if len(verse_text) > 200 else ''), verse_ok)}
   {row('Verificat', 'DA' if verse_ok else 'NU', verse_ok)}
+  {''.join([row('Avertisment', verse_warning, False)]) if verse_warning else ''}
 </table>
+<div style="padding:4px 12px 10px;">{dbg_section}</div>
+</div>
 
 <h3 style="color:#8B0000;font-size:14px;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px;">
-  3. Imagine fallback
+  3. Imagine Facebook
+  <span style="font-weight:normal;color:#888;font-size:12px;">({t_img}s)</span>
 </h3>
-<div style="background:#fff;border-radius:8px;padding:12px;box-shadow:0 1px 6px rgba(0,0,0,.07);margin-bottom:20px;">
+<div style="background:#fff;border-radius:8px;box-shadow:0 1px 6px rgba(0,0,0,.07);margin-bottom:20px;overflow:hidden;">
+<table style="width:100%;border-collapse:collapse;">
+  {row('URL incercat', img_status['tried_url'], None)}
+  {row('Status HTTP', str(img_status['status_code']), img_status['verified'])}
+  {row('Fallback folosit', 'DA' if img_status['fallback_used'] else 'NU', None)}
+  {row('Sursa locala', 'DA' if img_status['is_local'] else 'NU', None)}
+  {row('URL final', img_url, img_status['verified'])}
+</table>
+<div style="padding:12px;">
   <img src="{img_url}" referrerpolicy="no-referrer" crossorigin="anonymous"
        style="max-width:100%;border-radius:6px;max-height:200px;object-fit:cover;"
        onerror="this.style.display='none';document.getElementById('img-err').style.display='block';" />
   <div id="img-err" style="display:none;color:#c62828;font-size:13px;padding:8px 0;">
-    ✗ Imaginea nu s-a incarcat: {img_url}
+    ✗ Imaginea nu s-a incarcat in browser: {img_url}
   </div>
-  <p style="margin:8px 0 0;font-size:12px;color:#888;word-break:break-all;">{img_url}</p>
+</div>
 </div>
 
 {warnings_html}
