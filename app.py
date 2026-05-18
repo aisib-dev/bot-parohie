@@ -20,6 +20,8 @@ WP_USER       = os.environ.get('WP_USER', 'cetate2AI')
 WP_PASS       = os.environ.get('WP_PASS', '')
 TG_TOKEN      = os.environ.get('TG_TOKEN', '')
 TG_CHAT_ID    = os.environ.get('TG_CHAT_ID', '')
+FB_PAGE_TOKEN = os.environ.get('FB_PAGE_TOKEN', '')
+FB_PAGE_ID    = os.environ.get('FB_PAGE_ID', '')
 
 client = OpenAI(api_key=GROQ_KEY, base_url="https://api.groq.com/openai/v1")
 pending_articol = {}
@@ -177,15 +179,53 @@ def get_zi_romana(dt=None):
             'iulie','august','septembrie','octombrie','noiembrie','decembrie']
     return f"{zile[dt.weekday()]}, {dt.day} {luni[dt.month]} {dt.year}"
 
+def calc_paste_ortodox(year):
+    """Calculeaza data Pastelui Ortodox (Gregorian) pentru orice an."""
+    a = year % 4
+    b = year % 7
+    c = year % 19
+    d = (19 * c + 15) % 30
+    e = (2 * a + 4 * b - d + 34) % 7
+    month = (d + e + 114) // 31
+    day = ((d + e + 114) % 31) + 1
+    # Data iuliana -> gregoriana (+13 zile, valabil 1900-2099)
+    return datetime.date(year, month, day) + datetime.timedelta(days=13)
+
+def get_posturi_an(year):
+    """Returneaza listele de posturi pentru un an, calculate dinamic."""
+    paste = calc_paste_ortodox(year)
+    # Postul Mare: de luni pana sambata din Saptamana Floriilor (48 zile inainte)
+    post_mare_start = paste - datetime.timedelta(days=48)
+    post_mare_end   = paste - datetime.timedelta(days=8)
+    # Postul Apostolilor: luni dupa Rusalii (Paste+56) pana pe 28 iunie
+    rusalii = paste + datetime.timedelta(days=49)
+    post_ap_start = rusalii + datetime.timedelta(days=8)
+    post_ap_end   = datetime.date(year, 6, 28)
+    # Postul Adormirii: 1-14 august (fix)
+    post_ad_start = datetime.date(year, 8, 1)
+    post_ad_end   = datetime.date(year, 8, 14)
+    # Postul Craciunului: 15 nov - 24 dec (fix)
+    post_cr_start = datetime.date(year, 11, 15)
+    post_cr_end   = datetime.date(year, 12, 24)
+    return [
+        (post_mare_start, post_mare_end,   "Postul Mare"),
+        (post_ap_start,   post_ap_end,     "Postul Sfintilor Apostoli"),
+        (post_ad_start,   post_ad_end,     "Postul Adormirii Maicii Domnului"),
+        (post_cr_start,   post_cr_end,     "Postul Craciunului"),
+    ]
+
 def get_tip_zi(dt=None):
     if dt is None:
         dt = get_azi()
-    ziua   = (dt.month, dt.day)
-    zi_sapt = dt.weekday()  # 0=Luni, 6=Duminica
+    ziua    = (dt.month, dt.day)
+    zi_sapt = dt.weekday()
+    azi_date = dt.date() if hasattr(dt, 'date') else dt
 
-    # Saptamana Mare 2026 (se poate extinde pentru ani viitori)
-    saptamana_mare = [(4,6),(4,7),(4,8),(4,9),(4,10),(4,11)]
-    if ziua in saptamana_mare:
+    paste = calc_paste_ortodox(dt.year)
+
+    # Saptamana Mare: 6 zile inainte de Paste
+    saptamana_mare_dates = {paste - datetime.timedelta(days=i) for i in range(1, 7)}
+    if azi_date in saptamana_mare_dates:
         return 'saptamana_mare'
 
     # Sarbatori mari fixe
@@ -196,40 +236,38 @@ def get_tip_zi(dt=None):
     if ziua in sarbatori:
         return 'sarbatoare'
 
-    azi_date = dt.date() if hasattr(dt,'date') else dt
-
-    # Posturi 2026 - de actualizat anual
-    posturi = [
-        (datetime.date(2026,2,23), datetime.date(2026,4,11)),
-        (datetime.date(2026,6,15), datetime.date(2026,6,28)),
-        (datetime.date(2026,8,1),  datetime.date(2026,8,14)),
-        (datetime.date(2026,11,15),datetime.date(2026,12,24)),
-    ]
-    inceputuri = [p[0] for p in posturi]
-    in_post = any(s <= azi_date <= e for s,e in posturi)
+    posturi = get_posturi_an(dt.year)
+    inceputuri = {p[0] for p in posturi}
+    in_post = any(s <= azi_date <= e for s, e, _ in posturi)
 
     if azi_date in inceputuri:
         return 'inceput_post'
     if zi_sapt == 6:
         return 'duminica'
-    if in_post and zi_sapt in [2, 4]:  # Miercuri si Vineri din post
+    if in_post and zi_sapt in [2, 4]:
         return 'post'
     if in_post:
-        return 'post_saptamana'  # Restul zilelor din post
+        return 'post_saptamana'
     return 'obisnuit'
 
 def get_nume_saptamana_mare(dt=None):
     if dt is None:
         dt = get_azi()
-    zile = {
-        (4,6):  ("Lunea Mare","Iosif cel Prea Frumos si smochinul neroditor"),
-        (4,7):  ("Martea Mare","Parabolele Mantuitorului si semnele sfarsitului"),
-        (4,8):  ("Miercurea Mare","Ungerea cu mir la Betania si vanzarea lui Iuda"),
-        (4,9):  ("Joia Mare","Cina cea de Taina si rugaciunea din Ghetsimani"),
-        (4,10): ("Vinerea Mare","Patimile, Rastignirea si Moartea Domnului"),
-        (4,11): ("Sambata Mare","Prohodul Domnului - intre moarte si Inviere"),
-    }
-    return zile.get((dt.month,dt.day), ("Saptamana Mare",""))
+    paste = calc_paste_ortodox(dt.year)
+    azi_date = dt.date() if hasattr(dt, 'date') else dt
+    teme = [
+        ("Lunea Mare",     "Iosif cel Prea Frumos si smochinul neroditor"),
+        ("Martea Mare",    "Parabolele Mantuitorului si semnele sfarsitului"),
+        ("Miercurea Mare", "Ungerea cu mir la Betania si vanzarea lui Iuda"),
+        ("Joia Mare",      "Cina cea de Taina si rugaciunea din Ghetsimani"),
+        ("Vinerea Mare",   "Patimile, Rastignirea si Moartea Domnului"),
+        ("Sambata Mare",   "Prohodul Domnului - intre moarte si Inviere"),
+    ]
+    for i, (titlu, tema) in enumerate(teme):
+        zi_sm = paste - datetime.timedelta(days=6 - i)
+        if zi_sm == azi_date:
+            return titlu, tema
+    return "Saptamana Mare", ""
 
 def get_nume_sarbatoare(dt):
     s = {
@@ -245,11 +283,11 @@ def get_nume_sarbatoare(dt):
     return s.get((dt.month,dt.day), "Sarbatoare")
 
 def get_nume_post(dt):
-    p = {
-        (2,23):"Postul Mare",(6,15):"Postul Sfintilor Apostoli",
-        (8,1):"Postul Adormirii Maicii Domnului",(11,15):"Postul Craciunului",
-    }
-    return p.get((dt.month,dt.day), "Postul")
+    azi_date = dt.date() if hasattr(dt, 'date') else dt
+    for start, end, nume in get_posturi_an(dt.year):
+        if azi_date == start:
+            return nume
+    return "Postul"
 
 # ============================================================
 #  SCRAPING
@@ -440,6 +478,25 @@ def publica_articol(titlu, continut, categorii=None, featured_media=None):
     res = r.json()
     return res.get('id'), res.get('link', '')
 
+def publica_facebook(text, link=''):
+    """Posteaza direct pe pagina de Facebook prin Graph API."""
+    if not FB_PAGE_TOKEN or not FB_PAGE_ID:
+        return None, "FB_PAGE_TOKEN sau FB_PAGE_ID lipsa in variabilele de mediu"
+    try:
+        payload = {'message': text, 'access_token': FB_PAGE_TOKEN}
+        if link:
+            payload['link'] = link
+        r = requests.post(
+            f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/feed",
+            data=payload, timeout=30
+        )
+        res = r.json()
+        if 'id' in res:
+            return res['id'], ''
+        return None, res.get('error', {}).get('message', str(res))
+    except Exception as e:
+        return None, str(e)
+
 def upload_media(data_bytes, filename, mime):
     enc = base64.b64encode(f"{WP_USER}:{WP_PASS}".encode()).decode()
     h = {
@@ -533,6 +590,35 @@ def call_claude(system, user, max_tokens=4000, img_b64=None, media_type='image/j
         ]
     )
     return response.choices[0].message.content
+
+def transcrie_audio_groq(audio_bytes, mime='audio/ogg'):
+    """Transcrie audio cu Groq Whisper-large-v3, limbă română."""
+    import tempfile, os as _os
+    ext_map = {
+        'audio/ogg': '.ogg', 'audio/oga': '.ogg',
+        'audio/mp3': '.mp3', 'audio/mpeg': '.mp3',
+        'audio/wav': '.wav', 'audio/m4a': '.m4a', 'audio/mp4': '.m4a',
+    }
+    ext = ext_map.get(mime, '.ogg')
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
+            f.write(audio_bytes)
+            tmp = f.name
+        with open(tmp, 'rb') as f:
+            result = client.audio.transcriptions.create(
+                model='whisper-large-v3',
+                file=f,
+                language='ro',
+            )
+        return result.text.strip()
+    except Exception as e:
+        print(f"Whisper error: {e}")
+        return ''
+    finally:
+        if tmp:
+            try: _os.unlink(tmp)
+            except: pass
 
 def parse_json_robust(text):
     def clean(s):
@@ -996,10 +1082,23 @@ def webhook():
             post_id, link = publica_articol(art['titlu_wp'], continut, cat, media_id)
 
             if link:
-                tg_send(
-                    f"Publicat pe WordPress!\n{link}\n\n"
-                    f"Facebook preia automat prin Zapier."
-                )
+                fb_text = art.get('fb_text', '')
+                fb_id, fb_err = publica_facebook(fb_text, link)
+                if fb_id:
+                    tg_send(
+                        f"✓ Publicat pe WordPress!\n{link}\n\n"
+                        f"✓ Publicat pe Facebook!"
+                    )
+                elif FB_PAGE_TOKEN and FB_PAGE_ID:
+                    tg_send(
+                        f"✓ Publicat pe WordPress!\n{link}\n\n"
+                        f"⚠ Facebook eroare: {fb_err}"
+                    )
+                else:
+                    tg_send(
+                        f"✓ Publicat pe WordPress!\n{link}\n\n"
+                        f"(Facebook: seteaza FB_PAGE_TOKEN si FB_PAGE_ID pe Render)"
+                    )
             else:
                 tg_send("Eroare - verificati WordPress.")
             pending_articol = {}
@@ -1100,14 +1199,20 @@ def webhook():
         threading.Thread(target=proc_photo).start()
 
     elif audio:
-        tg_send("Am primit mesajul audio. Procesez... (30-60 sec)")
+        tg_send("Am primit mesajul audio. Transcriu cu Whisper... (30-60 sec)")
         def proc_audio():
             try:
                 ab = tg_get_file(audio.get('file_id'))
                 if not ab:
                     tg_send("Nu am putut descarca audio.")
                     return
-                transcriptie = caption or "Mesaj duhovnicesc de la preotul parohiei"
+                # Transcriere reala cu Groq Whisper
+                mime = audio.get('mime_type', 'audio/ogg')
+                transcriptie = transcrie_audio_groq(ab, mime)
+                if transcriptie:
+                    tg_send(f"Transcriptie: {transcriptie[:300]}")
+                else:
+                    transcriptie = caption or "Mesaj duhovnicesc de la preotul parohiei"
                 data = _gen_din_audio(transcriptie, caption)
                 data['audio_bytes'] = ab
                 data['categorii'] = [CAT_POSTARI_NOI, CAT_TRAIESTE]
