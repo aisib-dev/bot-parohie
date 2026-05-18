@@ -1782,6 +1782,117 @@ def test_wp():
     )
     return jsonify({'status': r.status_code, 'ok': r.status_code == 200})
 
+@app.route('/test')
+def ep_test():
+    dt = get_azi()
+    zi_str = get_zi_romana(dt)
+
+    # 1. Doxologia
+    t0 = __import__('time').time()
+    zi_data = fetch_doxologia_calendar(dt)
+    t_dox = round(__import__('time').time() - t0, 2)
+
+    # 2. Verset bibliaortodoxa.ro
+    ev_ref = zi_data['gospel']['reference']
+    ap_ref = zi_data['apostle']['reference']
+    verse_ref = ev_ref or ap_ref
+    verse = {}
+    t_verse = 0
+    if verse_ref:
+        t1 = __import__('time').time()
+        verse = fetch_biblia_ortodoxa_verse(verse_ref)
+        t_verse = round(__import__('time').time() - t1, 2)
+
+    # 3. Imagine fallback
+    img_url = get_imagine_fallback()
+
+    def row(label, value, ok=None):
+        if ok is True:
+            icon = '<span style="color:#2e7d32;font-weight:bold;">✓</span>'
+        elif ok is False:
+            icon = '<span style="color:#c62828;font-weight:bold;">✗</span>'
+        else:
+            icon = ''
+        val_style = 'color:#1a1a1a;' if value else 'color:#999;font-style:italic;'
+        return (
+            f'<tr><td style="padding:8px 12px;font-size:12px;color:#666;'
+            f'text-transform:uppercase;letter-spacing:1px;white-space:nowrap;'
+            f'border-bottom:1px solid #f0e8e8;">{label}</td>'
+            f'<td style="padding:8px 12px;font-size:14px;{val_style}'
+            f'border-bottom:1px solid #f0e8e8;">{icon} {value or "—"}</td></tr>'
+        )
+
+    saints_html = '<br>'.join(zi_data['saints']) if zi_data['saints'] else '—'
+    warnings_html = ''
+    if zi_data['warnings']:
+        items = ''.join(f'<li>{w}</li>' for w in zi_data['warnings'])
+        warnings_html = (
+            f'<div style="background:#fff3cd;border:1px solid #ffc107;'
+            f'padding:10px 14px;margin:16px 0;border-radius:6px;font-size:13px;">'
+            f'<b>Avertismente:</b><ul style="margin:6px 0 0;padding-left:18px;">'
+            f'{items}</ul></div>'
+        )
+
+    verse_text = verse.get('text', '')
+    verse_ok   = verse.get('verified', False)
+    verse_url  = verse.get('source_url', '')
+    verse_link = (f'<a href="{verse_url}" target="_blank" style="color:#8B0000;">'
+                  f'{verse_ref}</a>') if verse_url else verse_ref
+
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Test Bot Parohie</title>
+</head>
+<body style="font-family:Georgia,serif;max-width:700px;margin:32px auto;padding:0 16px;background:#fdf8f3;">
+
+<h2 style="color:#8B0000;margin:0 0 4px;font-size:20px;">Test Pipeline Liturgic</h2>
+<p style="margin:0 0 20px;color:#888;font-size:13px;">{zi_str}</p>
+
+<h3 style="color:#8B0000;font-size:14px;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px;">
+  1. Doxologia.ro
+  <span style="font-weight:normal;color:#888;font-size:12px;">({t_dox}s)</span>
+</h3>
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:8px;
+  box-shadow:0 1px 6px rgba(0,0,0,.07);margin-bottom:20px;overflow:hidden;">
+  {row('Sfintii zilei', saints_html, bool(zi_data['saints']))}
+  {row('Apostolul', ap_ref, bool(ap_ref))}
+  {row('Evanghelia', ev_ref, bool(ev_ref))}
+</table>
+
+<h3 style="color:#8B0000;font-size:14px;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px;">
+  2. Biblia Ortodoxa ({verse_link})
+  <span style="font-weight:normal;color:#888;font-size:12px;">({t_verse}s)</span>
+</h3>
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:8px;
+  box-shadow:0 1px 6px rgba(0,0,0,.07);margin-bottom:20px;overflow:hidden;">
+  {row('Referinta', verse_ref, bool(verse_ref))}
+  {row('Text verset', verse_text[:200] + ('…' if len(verse_text) > 200 else ''), verse_ok)}
+  {row('Verificat', 'DA' if verse_ok else 'NU', verse_ok)}
+</table>
+
+<h3 style="color:#8B0000;font-size:14px;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px;">
+  3. Imagine fallback
+</h3>
+<div style="background:#fff;border-radius:8px;padding:12px;box-shadow:0 1px 6px rgba(0,0,0,.07);margin-bottom:20px;">
+  <img src="{img_url}" style="max-width:100%;border-radius:6px;max-height:200px;object-fit:cover;"
+       onerror="this.style.display='none';document.getElementById('img-err').style.display='block';" />
+  <div id="img-err" style="display:none;color:#c62828;font-size:13px;padding:8px 0;">
+    ✗ Imaginea nu s-a incarcat: {img_url}
+  </div>
+  <p style="margin:8px 0 0;font-size:12px;color:#888;word-break:break-all;">{img_url}</p>
+</div>
+
+{warnings_html}
+
+<p style="font-size:12px;color:#aaa;margin-top:24px;border-top:1px solid #e8ddd0;padding-top:12px;">
+  <a href="/preview_fb" style="color:#8B0000;">→ Preview Facebook</a> &nbsp;|&nbsp;
+  <a href="/genereaza" style="color:#8B0000;">→ Genereaza articol</a> &nbsp;|&nbsp;
+  <a href="/test" style="color:#8B0000;">↺ Refresh test</a>
+</p>
+</body></html>"""
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
