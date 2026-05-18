@@ -322,16 +322,31 @@ def get_nume_post(dt):
 # ============================================================
 def scrape_sfinti():
     try:
-        h = {'User-Agent':'Mozilla/5.0'}
-        r = requests.get('https://doxologia.ro/calendar-ortodox', headers=h, timeout=10)
-        m = re.findall(r'<h[23][^>]*>([^<]{10,100})</h[23]>', r.text)
-        sfinti = [x.strip() for x in m if any(
-            k in x.lower() for k in
-            ['sf.','sfanta','sfantul','cuviosul','mucenic','ierarh','apostol','prooroc','cuv.']
-        )]
-        return sfinti[:6]
+        h = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        for url in ['https://doxologia.ro/calendar-ortodox', 'https://calendar.patriarhia.ro']:
+            try:
+                r = requests.get(url, headers=h, timeout=10)
+                # Incearca mai multe pattern-uri
+                sfinti = []
+                for pat in [
+                    r'<h[1-4][^>]*>([^<]{10,120})</h[1-4]>',
+                    r'<(?:li|p|span|td)[^>]*>([^<]{10,120})</(?:li|p|span|td)>',
+                ]:
+                    m = re.findall(pat, r.text)
+                    found = [x.strip() for x in m if any(
+                        k in x.lower() for k in
+                        ['sf.','sfânta','sfântul','sfanta','sfantul','cuviosul','mucenic',
+                         'ierarh','apostol','prooroc','cuv.','cuvios','martir','martir']
+                    )]
+                    sfinti.extend(found)
+                sfinti = list(dict.fromkeys(sfinti))  # deduplica
+                if sfinti:
+                    return sfinti[:6]
+            except:
+                continue
     except:
-        return []
+        pass
+    return []
 
 def _ref_to_bibliortodoxa_url(ref):
     """Transforma o referinta biblica in URL bibliortodoxa.ro."""
@@ -954,7 +969,7 @@ JSON:
 {{
   "titlu_wp": "titlu evocator, poetic, nu banal - 6-10 cuvinte",
   "continut_wp": "HTML complet aerisit: <h2 style='color:#8B0000;font-family:Georgia,serif;'>Sfintii zilei</h2> <p>descriere vie a fiecarui sfant, legatura cu viata de azi</p> <h2 style='color:#8B0000;font-family:Georgia,serif;'>Meditatie duhovniceasca</h2> <p>paragraf 1 - deschide cu o intrebare sau imagine poetica</p> <p>paragraf 2 - dezvoltare teologica accesibila cu referinta patristica concreta</p> <p>paragraf 3 - aplicatie pastorala calda</p> <h3 style='color:#8B0000;'>Morala zilei</h3> <p>un paragraf scurt, memorabil, practic</p>",
-  "fb_text": "220-260 cuvinte: incepe cu Apostolul sau Evanghelia ca scurt citat + Sfintii zilei pe scurt + meditatie calda stil Pr. Necula + intrebare sau indemn + #ParohiaCetate2Sibiu #EvanghelliaZilei #SfintiiZilei #Ortodox #Sibiu"
+  "fb_text": "220-260 cuvinte: incepe cu un verset scurt exact din Apostol sau Evanghelie (din Biblia Ortodoxa Romana) pus intre ghilimele cu referinta (ex: Ioan 3,16) + mentionezi explicit sfintii zilei ({sfinti}) + meditatie calda 3-4 randuri stil Pr. Necula + intrebare sau indemn concret + #ParohiaCetate2Sibiu #EvanghelliaZilei #SfintiiZilei #Ortodox #Sibiu"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 4500))
     # Inserez blocul lecturilor la inceput
@@ -973,7 +988,7 @@ JSON:
 {{
   "titlu_wp": "titlu duminical profund si evocator - 6-10 cuvinte",
   "continut_wp": "HTML aerisit: <h2 style='color:#8B0000;font-family:Georgia,serif;'>Sfintii Duminicii</h2> <p>descriere</p> <h2 style='color:#8B0000;font-family:Georgia,serif;'>Predica Duminicii</h2> <p>deschide cu o intrebare existentiala</p> <p>dezvoltare teologica 2-3 paragrafe cu referinte patristice</p> <p>aplicatie pastorala calda</p> {ips_html} <h3 style='color:#8B0000;'>Morala Duminicii</h3> <p>concluzie practica si indemn pentru saptamana</p>",
-  "fb_text": "250-280 cuvinte: Apostol scurt + Evanghelie scurta + meditatie duminicala calda + urare + #DuminicaOrtodoxa #ParohiaCetate2Sibiu #Evanghelie #Predica #Sibiu"
+  "fb_text": "250-280 cuvinte: verset exact din Evanghelia duminicii (din Biblia Ortodoxa Romana) pus intre ghilimele cu referinta + sfintii duminicii ({sfinti}) + meditatie duminicala calda 3-4 randuri + urare calduroasa + #DuminicaOrtodoxa #ParohiaCetate2Sibiu #Evanghelie #Predica #Sibiu"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 5500))
     d['continut_wp'] = _bloc_lecturi(apostol, evanghelie) + d.get('continut_wp','')
@@ -991,7 +1006,7 @@ JSON:
 {{
   "titlu_wp": "titlu festiv si evocator",
   "continut_wp": "HTML festiv aerisit: <h2 style='color:#8B0000;font-family:Georgia,serif;'>{nume}</h2> <p>semnificatia sarbatorii in 1-2 paragrafe</p> <blockquote style='border-left:4px solid #8B0000;padding:12px 16px;margin:16px 0;background:#fdf8f3;font-style:italic;'>Troparul sarbatorii</blockquote> <blockquote style='border-left:4px solid #c9a227;padding:12px 16px;margin:16px 0;background:#fffdf5;font-style:italic;'>Condacul</blockquote> <h2 style='color:#8B0000;font-family:Georgia,serif;'>Meditatie</h2> <p>2-3 paragrafe despre taina sarbatorii cu referinte patristice</p> <h3 style='color:#8B0000;'>Morala sarbatorii</h3> <p>urare calda pentru credinciosi</p>",
-  "fb_text": "220-260 cuvinte: urare in duhul Bisericii + Tropar scurt + meditatie calda + indemn la slujba si rugaciune + emoji potrivite + hashtag-uri"
+  "fb_text": "220-260 cuvinte: urare calda de sarbatoare + verset exact din Evanghelia sarbatorii (din Biblia Ortodoxa Romana) intre ghilimele cu referinta + Tropar scurt + meditatie 2-3 randuri + indemn la slujba + emoji potrivite + #ParohiaCetate2Sibiu #{nume.replace(' ','')} #Ortodox #Sibiu"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 5000))
     d['continut_wp'] = _bloc_lecturi(apostol, evanghelie) + d.get('continut_wp','')
@@ -1026,7 +1041,7 @@ JSON:
 {{
   "titlu_wp": "titlu poetic pentru zi de post",
   "continut_wp": "HTML aerisit: <h2 style='color:#8B0000;font-family:Georgia,serif;'>Sfintii zilei</h2> <p>descriere scurta</p> <h2 style='color:#8B0000;font-family:Georgia,serif;'>Postul ca rugaciune a trupului</h2> <p>paragraf 1 - sensul postului dincolo de abtinere</p> <p>paragraf 2 - intalnirea cu Dumnezeu prin post, citat patristic</p> <p>paragraf 3 - aplicatie practica pentru ziua de azi</p> <h3 style='color:#8B0000;'>Morala zilei</h3> <p>un indemn scurt si memorabil</p>",
-  "fb_text": "180-220 cuvinte: Apostol sau Evanghelie + Sfintii zilei + citat patristic + indemn pentru zi de post + hashtag-uri #ZiDePost #ParohiaCetate2Sibiu #Ortodox"
+  "fb_text": "180-220 cuvinte: verset exact din Apostol sau Evanghelie (din Biblia Ortodoxa Romana) intre ghilimele + sfintii zilei ({sfinti}) + citat patristic scurt despre post + indemn concret pentru zi de post + #ZiDePost #ParohiaCetate2Sibiu #Ortodox"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 4000))
     d['continut_wp'] = _bloc_lecturi(apostol, evanghelie) + d.get('continut_wp','')
@@ -1441,13 +1456,30 @@ def ep_preview_fb():
     art = _load_pending()
     if not art:
         return "Nu exista articol in asteptare.", 200
-    fb = art.get('fb_text', '')
+    fb    = art.get('fb_text', '')
     titlu = art.get('titlu_wp', '')
-    return f"<html><body style='font-family:Georgia,serif;max-width:600px;margin:40px auto;padding:20px;'>" \
-           f"<p style='color:#888;font-size:12px;'>TITLU WP: {titlu}</p>" \
-           f"<hr>" \
-           f"<p style='white-space:pre-wrap;font-size:15px;line-height:1.8;'>{fb}</p>" \
-           f"</body></html>"
+    img   = art.get('imagine_url', '')
+    sfinti = ', '.join(art.get('sfinti_list', [])) or '—'
+    apostol = art.get('apostol', '—')
+    evanghelie = art.get('evanghelie', '—')
+    img_html = f'<img src="{img}" style="width:100%;border-radius:8px;margin-bottom:16px;" />' if img else ''
+    return f"""<html><head><meta charset="utf-8"></head>
+<body style="font-family:Georgia,serif;max-width:620px;margin:40px auto;padding:20px;background:#fdf8f3;">
+<div style="background:#fff;border-radius:12px;padding:24px;box-shadow:0 2px 12px rgba(0,0,0,.08);">
+  {img_html}
+  <p style="margin:0 0 4px;font-size:11px;color:#999;text-transform:uppercase;letter-spacing:1px;">Titlu WordPress</p>
+  <p style="margin:0 0 16px;font-size:18px;font-weight:bold;color:#8B0000;">{titlu}</p>
+  <p style="margin:0 0 4px;font-size:11px;color:#999;text-transform:uppercase;letter-spacing:1px;">Sfintii zilei</p>
+  <p style="margin:0 0 16px;font-size:13px;font-style:italic;color:#555;">{sfinti}</p>
+  <p style="margin:0 0 4px;font-size:11px;color:#999;text-transform:uppercase;letter-spacing:1px;">Apostolul</p>
+  <p style="margin:0 0 16px;font-size:13px;color:#333;">{apostol[:200]}</p>
+  <p style="margin:0 0 4px;font-size:11px;color:#999;text-transform:uppercase;letter-spacing:1px;">Evanghelia</p>
+  <p style="margin:0 0 20px;font-size:13px;color:#333;">{evanghelie[:200]}</p>
+  <hr style="border:none;border-top:2px solid #8B0000;margin:0 0 20px;">
+  <p style="margin:0 0 4px;font-size:11px;color:#999;text-transform:uppercase;letter-spacing:1px;">Text Facebook</p>
+  <p style="margin:0;white-space:pre-wrap;font-size:15px;line-height:1.9;color:#1a1a1a;">{fb}</p>
+</div>
+</body></html>"""
 
 @app.route('/citat')
 @app.route('/sfinti')
