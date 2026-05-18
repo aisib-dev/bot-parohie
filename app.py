@@ -521,47 +521,59 @@ def call_claude(system, user, max_tokens=4000, img_b64=None, media_type='image/j
     return response.choices[0].message.content
 
 def parse_json_robust(text):
-    def fix_newlines(s):
+    def clean(s):
+        # Inlocuieste newline-urile literale din interiorul string-urilor JSON
         result = []
-        in_string = False
+        in_str = False
         i = 0
         while i < len(s):
-            c = s[i]
-            if c == '"' and (i == 0 or s[i-1] != '\\'):
-                in_string = not in_string
-            if c == '\n' and in_string:
-                result.append('\\n')
-            elif c == '\r' and in_string:
-                result.append('\\r')
+            ch = s[i]
+            # detecteaza ghilimele (deschidere/inchidere string), ignorand escaped \"
+            if ch == '"':
+                nb = 0
+                j = i - 1
+                while j >= 0 and s[j] == '\\':
+                    nb += 1
+                    j -= 1
+                if nb % 2 == 0:
+                    in_str = not in_str
+            if in_str and ch == '\n':
+                result.append(' ')
+            elif in_str and ch == '\r':
+                pass
             else:
-                result.append(c)
+                result.append(ch)
             i += 1
         return ''.join(result)
 
-    try:
-        return json.loads(text)
-    except:
-        pass
-    m = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
-    if m:
-        content = m.group(1)
+    def try_parse(s):
         try:
-            return json.loads(content)
+            return json.loads(s)
         except:
             try:
-                return json.loads(fix_newlines(content))
+                return json.loads(clean(s))
             except:
-                pass
+                return None
+
+    # 1. Incearca direct
+    r = try_parse(text)
+    if r is not None:
+        return r
+
+    # 2. Extrage din bloc ```json ... ```
+    m = re.search(r'```(?:json)?\s*([\s\S]*?)(?:```|$)', text)
+    if m:
+        r = try_parse(m.group(1).strip())
+        if r is not None:
+            return r
+
+    # 3. Extrage primul { ... } din text
     m = re.search(r'\{[\s\S]*\}', text)
     if m:
-        content = m.group(0)
-        try:
-            return json.loads(content)
-        except:
-            try:
-                return json.loads(fix_newlines(content))
-            except:
-                pass
+        r = try_parse(m.group(0))
+        if r is not None:
+            return r
+
     raise ValueError("JSON invalid: " + text[:200])
 
 # ============================================================
@@ -585,7 +597,8 @@ REGULI DE SCRIERE:
 8. Structura AERISITA: paragrafe scurte (3-5 randuri), spatii intre sectiuni, nu ziduri de text
 9. HTML elegant: foloseste <p> pentru fiecare paragraf, <blockquote> stilizat pentru citate
 
-Raspunzi EXCLUSIV cu JSON valid. Zero text in afara JSON. Zero markdown in afara JSON."""
+Raspunzi EXCLUSIV cu JSON valid. Zero text in afara JSON. Zero markdown in afara JSON.
+CRITIC: In valorile JSON, HTML-ul trebuie scris PE O SINGURA LINIE, fara newline-uri literale. Foloseste spatii intre taguri HTML, nu enter/newline."""
 
 # ============================================================
 #  GENERARE PRINCIPALA
