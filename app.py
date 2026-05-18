@@ -419,7 +419,7 @@ def wp_auth():
 def publica_articol(titlu, continut, categorii=None, featured_media=None):
     if categorii is None:
         categorii = [CAT_TRAIESTE]
-    continut_final = continut + SEMNATURA_HTML + get_bloc_resurse()
+    continut_final = continut + WIDGET_DOXOLOGIA + SEMNATURA_HTML + get_bloc_resurse()
     data = {
         'title': titlu,
         'content': continut_final,
@@ -694,6 +694,14 @@ def genereaza_articol_zilnic(extra_text=''):
 # ============================================================
 #  GENERATOARE SPECIFICE
 # ============================================================
+WIDGET_DOXOLOGIA = """<div style="margin:24px 0;">
+<table width="100%" class="doxo-table"><tr><td><div>
+<script type="text/javascript">widgetContext_417c8830427f={"widgetid":"views_view_webwidget_765e55a9c50d100292071a1f227cd363"};</script>
+<script src="https://doxologia.ro/doxowidgetcalendar"></script>
+<div class="doxowidgetcalendar" id="views_view_webwidget_765e55a9c50d100292071a1f227cd363"></div>
+</div></td></tr></table>
+</div>"""
+
 def _bloc_sfinti(sfinti_list):
     if not sfinti_list:
         return ''
@@ -709,18 +717,18 @@ def _bloc_sfinti(sfinti_list):
 def _bloc_lecturi(apostol, evanghelie):
     if not apostol and not evanghelie:
         return ''
-    url_lecturi = 'https://doxologia.ro/lecturile-zilei'
+    url_cal = 'https://doxologia.ro/calendar-ortodox'
     bloc = '<div style="background:#fdf8f3;border-left:3px solid #8B0000;padding:16px 20px;margin:20px 0;border-radius:0 6px 6px 0;">'
     if apostol:
         bloc += (
             f'<p style="margin:0 0 6px 0;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#8B0000;font-weight:bold;">'
-            f'<a href="{url_lecturi}" target="_blank" style="color:#8B0000;text-decoration:none;">Apostolul zilei ↗</a></p>'
+            f'<a href="{url_cal}" target="_blank" style="color:#8B0000;text-decoration:none;">Apostolul zilei ↗</a></p>'
             f'<p style="margin:0 0 16px 0;font-style:italic;color:#333;line-height:1.8;">{apostol}</p>'
         )
     if evanghelie:
         bloc += (
             f'<p style="margin:0 0 6px 0;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#8B0000;font-weight:bold;">'
-            f'<a href="{url_lecturi}" target="_blank" style="color:#8B0000;text-decoration:none;">Evanghelia zilei ↗</a></p>'
+            f'<a href="{url_cal}" target="_blank" style="color:#8B0000;text-decoration:none;">Evanghelia zilei ↗</a></p>'
             f'<p style="margin:0;font-style:italic;color:#333;line-height:1.8;">{evanghelie}</p>'
         )
     bloc += '</div>'
