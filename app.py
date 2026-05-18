@@ -420,6 +420,57 @@ def get_nume_post(dt):
     return "Postul"
 
 # ============================================================
+#  BIBLIA ORTODOXA - abrevieri liturgice → nume complet
+# ============================================================
+ABREVIERI_BIBLICE = {
+    # Evanghelii
+    'mt': 'matei',   'mc': 'marcu',   'mr': 'marcu',
+    'lc': 'luca',    'lk': 'luca',
+    'in': 'ioan',    'io': 'ioan',
+    # Faptele Apostolilor
+    'fap': 'fapte',  'fp': 'fapte',   'fa': 'fapte',
+    # Epistole pauline
+    'rom': 'romani',
+    '1 cor': '1 corinteni', '2 cor': '2 corinteni',
+    'gal': 'galateni',
+    'ef': 'efeseni',   'efe': 'efeseni',
+    'fil': 'filipeni',
+    'col': 'coloseni',
+    '1 tes': '1 tesaloniceni', '2 tes': '2 tesaloniceni',
+    '1 th': '1 tesaloniceni',  '2 th': '2 tesaloniceni',
+    '1 tim': '1 timotei',      '2 tim': '2 timotei',
+    'ti': 'tit',     'tit': 'tit',
+    'flm': 'filimon',
+    'evr': 'evrei',  'ebr': 'evrei',
+    # Epistole soborniceşti
+    'iac': 'iacov',
+    '1 pt': '1 petru',  '2 pt': '2 petru',
+    '1 ptr': '1 petru', '2 ptr': '2 petru',
+    '1 in': '1 ioan',   '2 in': '2 ioan',   '3 in': '3 ioan',
+    'iud': 'iuda',
+    'apoc': 'apocalipsa',
+    # Psalmi / Poetic
+    'ps': 'psalmi',     'psl': 'psalmi',
+    'pild': 'pilde',    'prov': 'pilde',
+    'eccl': 'ecclesiastul',
+    # Pentateuh
+    'gen': 'facerea',   'fac': 'facerea',
+    'ies': 'iesirea',   'ex': 'iesirea',
+    'lv': 'leviticul',  'lev': 'leviticul',
+    'num': 'numerii',
+    'dt': 'deuteronomul', 'deut': 'deuteronomul',
+    # Istorice
+    'ios': 'iosua',
+    'jd': 'judecatori', 'jud': 'judecatori',
+    # Profetice
+    'is': 'isaia',      'isa': 'isaia',
+    'ier': 'ieremia',
+    'iez': 'iezechiel', 'ez': 'iezechiel',
+    'dan': 'daniel',
+    'plg': 'plangeri',  'plang': 'plangeri',
+}
+
+# ============================================================
 #  BIBLIA ORTODOXA - ID-uri carti verificate (bibliaortodoxa.ro)
 # ============================================================
 BIBLIA_BOOK_IDS = {
@@ -566,12 +617,33 @@ def _normalize_biblia_ref(ref):
     return ref
 
 def _lookup_book(book_raw):
-    """Cauta book_id dupa numele cartii. Returneaza (book_id, key_matched)."""
+    """Cauta book_id dupa numele cartii (inclusiv abrevieri liturgice).
+    Returneaza (book_id, key_matched).
+    """
     book_lower = book_raw.lower().strip()
+    # Elimina punctul final de la abrevieri: "Mt." → "mt"
+    book_clean = book_lower.rstrip('.')
+
+    # 1. Expandeaza abrevierea exacta (prioritate maxima)
+    expanded = ABREVIERI_BIBLICE.get(book_clean, book_clean)
+
+    # 2. Potrivire exacta pe forma expandata
+    if expanded in BIBLIA_BOOK_IDS:
+        return BIBLIA_BOOK_IDS[expanded], expanded
+
+    # 3. Potrivire exacta pe forma originala
     if book_lower in BIBLIA_BOOK_IDS:
         return BIBLIA_BOOK_IDS[book_lower], book_lower
-    # Potrivire partiala: cel mai lung key care se potriveste castiga
+
+    # 4. Potrivire partiala pe forma expandata (cel mai lung key castiga)
     best_key, best_id = '', None
+    for key, bid in BIBLIA_BOOK_IDS.items():
+        if (key in expanded or expanded in key) and len(key) > len(best_key):
+            best_key, best_id = key, bid
+    if best_id:
+        return best_id, best_key
+
+    # 5. Potrivire partiala pe forma originala (fallback)
     for key, bid in BIBLIA_BOOK_IDS.items():
         if (key in book_lower or book_lower in key) and len(key) > len(best_key):
             best_key, best_id = key, bid
@@ -991,9 +1063,16 @@ def build_telegram_preview(zi_data, titlu_wp=''):
 
 def _get_inline_keyboard_cuvant():
     return {
-        'inline_keyboard': [[
-            {'text': '🔁 Regenerează cuvântul de folos', 'callback_data': 'regen_cuvant'}
-        ]]
+        'inline_keyboard': [
+            [
+                {'text': '1️⃣ Folosește Scurt',       'callback_data': 'alege_scurt'},
+                {'text': '2️⃣ Duhovnicesc',           'callback_data': 'alege_duhovnicesc'},
+                {'text': '3️⃣ Catehetic',             'callback_data': 'alege_catehetic'},
+            ],
+            [
+                {'text': '🔁 Regenerează cuvântul de folos', 'callback_data': 'regen_cuvant'},
+            ],
+        ]
     }
 
 # ============================================================
@@ -1731,30 +1810,54 @@ def webhook():
         cb_chat = str(cb.get('message', {}).get('chat', {}).get('id', ''))
         cb_data = cb.get('data', '')
         cb_id   = cb.get('id', '')
-        if cb_chat == TG_CHAT_ID and cb_data == 'regen_cuvant':
-            tg_answer_callback(cb_id, 'Regenerez...')
-            def _regen_cuvant_bg():
+        if cb_chat == TG_CHAT_ID:
+            if cb_data == 'regen_cuvant':
+                tg_answer_callback(cb_id, 'Regenerez...')
+                def _regen_cuvant_bg():
+                    art = pending_articol
+                    zi = art.get('zi_data')
+                    if not zi:
+                        tg_send("Nu exista articol in asteptare pentru regenerare.")
+                        return
+                    variants = generate_pastoral_variants(zi)
+                    zi['pastoral_variants'] = variants
+                    zi['pastoral_reflection'] = (
+                        variants.get('scurt') or variants.get('duhovnicesc') or ''
+                    )
+                    pending_articol['zi_data'] = zi
+                    _save_pending(pending_articol)
+                    lines = ['<b>🔁 Cuvânt de folos — variante noi:</b>']
+                    labels = {'scurt': '1️⃣ Scurt și cald', 'duhovnicesc': '2️⃣ Duhovnicesc', 'catehetic': '3️⃣ Catehetic'}
+                    for key, label in labels.items():
+                        txt = variants.get(key, '')
+                        if txt:
+                            lines.append(f'\n<b>{label}:</b>\n{txt}')
+                    tg_send('\n'.join(lines), reply_markup=_get_inline_keyboard_cuvant())
+                threading.Thread(target=_regen_cuvant_bg, daemon=True).start()
+
+            elif cb_data in ('alege_scurt', 'alege_duhovnicesc', 'alege_catehetic'):
+                key_ales = cb_data.replace('alege_', '')
                 art = pending_articol
-                zi = art.get('zi_data')
-                if not zi:
-                    tg_send("Nu exista articol in asteptare pentru regenerare.")
-                    return
-                variants = generate_pastoral_variants(zi)
-                zi['pastoral_variants'] = variants
-                zi['pastoral_reflection'] = (
-                    variants.get('scurt') or variants.get('duhovnicesc') or ''
-                )
-                art['zi_data'] = zi
-                pending_articol.update({'zi_data': zi})
-                _save_pending(pending_articol)
-                lines = ['<b>🔁 Cuvânt de folos — variante noi:</b>']
-                labels = {'scurt': '1️⃣ Scurt și cald', 'duhovnicesc': '2️⃣ Duhovnicesc', 'catehetic': '3️⃣ Catehetic'}
-                for key, label in labels.items():
-                    txt = variants.get(key, '')
-                    if txt:
-                        lines.append(f'\n<b>{label}:</b>\n{txt}')
-                tg_send('\n'.join(lines), reply_markup=_get_inline_keyboard_cuvant())
-            threading.Thread(target=_regen_cuvant_bg, daemon=True).start()
+                zi  = art.get('zi_data', {})
+                variants = zi.get('pastoral_variants', {})
+                text_ales = variants.get(key_ales, '')
+                if not text_ales:
+                    tg_answer_callback(cb_id, 'Varianta indisponibila.')
+                else:
+                    # Reconstruieste fb_text cu varianta aleasa
+                    zi['pastoral_reflection'] = text_ales
+                    pending_articol['zi_data'] = zi
+                    fb_text_nou = build_facebook_post(zi)
+                    if fb_text_nou:
+                        autor_f, citat_f = get_citat_familie()
+                        pending_articol['fb_text'] = fb_text_nou + f'\n\n✦ {autor_f}:\n„{citat_f}"'
+                    _save_pending(pending_articol)
+                    label_map = {'scurt': '1️⃣ Scurt și cald', 'duhovnicesc': '2️⃣ Duhovnicesc', 'catehetic': '3️⃣ Catehetic'}
+                    tg_answer_callback(cb_id, f'✓ Ales: {label_map[key_ales]}')
+                    tg_send(
+                        f'<b>✓ Cuvânt de folos ales — {label_map[key_ales]}:</b>\n\n{text_ales}\n\n'
+                        f'<i>Textul Facebook a fost actualizat. Folosește /aproba pentru publicare.</i>'
+                    )
         return jsonify({'ok': True})
 
     msg     = update.get('message', {})
