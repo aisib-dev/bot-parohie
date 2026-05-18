@@ -104,10 +104,58 @@ def _cauta_an_omagial(an):
             continue
     fallback = {
         2025: "Anul omagial al preotilor parohiali si al misionarilor",
-        2026: "Anul omagial al rugaciunii in viata crestina",
+        2026: "Anul omagial al familiei crestine",
         2027: "Anul omagial al Sfintei Scripturi",
     }
     return fallback.get(an, f"Anul omagial {an}")
+
+# ============================================================
+#  CITATE FAMILIE - ANUL OMAGIAL 2026
+# ============================================================
+CITATE_FAMILIE = [
+    ("Sf. Ioan Gură de Aur",
+     "Nu există nimic mai dulce decât a fi iubit de soție și a o iubi. Cel care iubește pe soția sa se iubește pe sine însuși."),
+    ("Sf. Ioan Gură de Aur",
+     "Familia este o Biserică mică. Când tatăl, mama și copiii sunt uniți în rugăciune, Hristos este în mijlocul lor."),
+    ("Patriarhul Daniel",
+     "Familia creștină este primul loc în care copilul Îl întâlnește pe Dumnezeu, prin rugăciunea părinților și prin dragostea care domnește în casă."),
+    ("Patriarhul Daniel",
+     "Familia este școala iubirii jertfelnice, locul în care învățăm să dăruim fără să așteptăm în schimb."),
+    ("Pr. Constantin Necula",
+     "O familie care se roagă împreună rămâne împreună. Nu există furtună care să doboare casa zidită pe rugăciune."),
+    ("Pr. Constantin Necula",
+     "Copiii nu au nevoie de părinți perfecți, ci de părinți care știu să ceară iertare și să iubească necondiționat."),
+    ("Sf. Vasile cel Mare",
+     "Casa în care se citesc rugăciunile dimineții și serii este o cetate întărită pe care diavolul nu o poate doborî."),
+    ("Sf. Siluan Athonitul",
+     "Cel care iubește familia sa cu adevărat iubește în ea chipul lui Dumnezeu. Iubind pe ai tăi, Îl iubești pe El."),
+    ("Biblia — Efeseni 5, 25",
+     "Bărbații, iubiți pe femeile voastre, după cum și Hristos a iubit Biserica și S-a dat pe Sine pentru ea."),
+    ("Biblia — Coloseni 3, 14",
+     "Peste toate acestea, îmbrăcați-vă întru dragoste, care este legătura desăvârșirii."),
+    ("Biblia — Psalmul 127, 3",
+     "Fiii tăi ca niște vlăstare de măslin împrejurul mesei tale. Iată, așa se va binecuvânta omul cel ce se teme de Domnul."),
+]
+
+def get_citat_familie():
+    """Returneaza un citat aleator despre familie pentru Anul Omagial 2026."""
+    autor, citat = random.choice(CITATE_FAMILIE)
+    return autor, citat
+
+def get_bloc_familie():
+    """Bloc HTML cu citat despre familie pentru articolele WP."""
+    autor, citat = get_citat_familie()
+    return (
+        f'<div style="background:linear-gradient(135deg,#fff5f5,#fff8f8);border:1px solid #e8c0c0;'
+        f'border-left:5px solid #8B0000;padding:20px 24px;margin:24px 0;border-radius:0 8px 8px 0;'
+        f'box-shadow:0 2px 8px rgba(139,0,0,0.07);">'
+        f'<p style="margin:0 0 6px 0;font-size:11px;text-transform:uppercase;letter-spacing:2px;'
+        f'color:#8B0000;font-weight:700;">✦ Anul Omagial al Familiei Creștine 2026</p>'
+        f'<p style="margin:0 0 10px 0;font-size:15px;font-style:italic;color:#2c0000;'
+        f'line-height:1.9;font-family:Georgia,serif;">&ldquo;{citat}&rdquo;</p>'
+        f'<p style="margin:0;font-size:12px;color:#8B0000;font-weight:600;">— {autor}</p>'
+        f'</div>'
+    )
 
 # ============================================================
 #  ZILE SPECIALE
@@ -838,9 +886,11 @@ def genereaza_articol_zilnic(extra_text=''):
         evanghelie = f"{evanghelie} — {text_evanghelie}"
 
     sfinti_str = ', '.join(sfinti) if sfinti else 'Sfintii zilei'
-    s_extra = f'\nGandul preotului (integreaza natural, nu fortat): {extra_text}' if extra_text else ''
-    s_spec  = f'\nZi speciala de marcat discret: {zi_spec}' if zi_spec else ''
-    s_an    = f'\nAnul omagial (mentionare discreta): {an_om}' if an_om else ''
+    autor_f, citat_f = get_citat_familie()
+    s_extra  = f'\nGandul preotului (integreaza natural, nu fortat): {extra_text}' if extra_text else ''
+    s_spec   = f'\nZi speciala de marcat discret: {zi_spec}' if zi_spec else ''
+    s_an     = f'\nAnul omagial: {an_om} - integreaza un gand scurt despre familie.'
+    s_familie = f'\nCitat despre familie pentru fb_text (integreaza natural la final): {autor_f}: "{citat_f}"'
 
     try:
         if tip == 'saptamana_mare':
@@ -851,29 +901,29 @@ def genereaza_articol_zilnic(extra_text=''):
 
         elif tip == 'sarbatoare':
             nume = get_nume_sarbatoare(dt)
-            data = _gen_sarbatoare(zi, nume, apostol, evanghelie, s_extra, s_spec, s_an)
+            data = _gen_sarbatoare(zi, nume, apostol, evanghelie, s_extra, s_spec, s_an + s_familie)
             data['categorii'] = [CAT_PREDICA, CAT_POSTARI_NOI]
             data['imagine_query'] = nume.lower()
 
         elif tip == 'inceput_post':
             nume = get_nume_post(dt)
-            data = _gen_inceput_post(zi, nume, apostol, evanghelie, s_extra, s_an)
+            data = _gen_inceput_post(zi, nume, apostol, evanghelie, s_extra, s_an + s_familie)
             data['categorii'] = [CAT_TRAIESTE]
             data['imagine_query'] = 'post'
 
         elif tip == 'duminica':
             nr = dt.isocalendar()[1]
             data = _gen_duminica(zi, sfinti_str, apostol, evanghelie,
-                                  (nr % 3 == 0), s_extra, s_spec, s_an)
+                                  (nr % 3 == 0), s_extra, s_spec, s_an + s_familie)
             data['categorii'] = [CAT_PREDICA, CAT_TRAIESTE]
 
         elif tip in ['post', 'post_saptamana']:
-            data = _gen_zi_post(zi, sfinti_str, apostol, evanghelie, s_extra, s_spec, tip)
+            data = _gen_zi_post(zi, sfinti_str, apostol, evanghelie, s_extra + s_familie, s_spec, tip)
             data['categorii'] = [CAT_TRAIESTE]
             data['imagine_query'] = 'post'
 
         else:
-            data = _gen_zi_obisnuita(zi, sfinti_str, apostol, evanghelie, s_extra, s_spec, s_an)
+            data = _gen_zi_obisnuita(zi, sfinti_str, apostol, evanghelie, s_extra, s_spec, s_an + s_familie)
             data['categorii'] = [CAT_TRAIESTE, CAT_POSTARI_NOI]
 
         # Metadata pentru preview Telegram
@@ -883,6 +933,13 @@ def genereaza_articol_zilnic(extra_text=''):
 
         # Adauga bloc sfinti la inceputul articolului
         data['continut_wp'] = _bloc_sfinti(sfinti) + data.get('continut_wp', '')
+
+        # Bloc familie - Anul Omagial 2026
+        data['continut_wp'] = data['continut_wp'] + get_bloc_familie()
+
+        # Citat familie pentru Facebook
+        autor_f, citat_f = get_citat_familie()
+        data['citat_familie'] = f'"{citat_f}" — {autor_f}'
 
         # Imagine
         query = data.get('imagine_query', tip)
