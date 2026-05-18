@@ -478,11 +478,35 @@ def publica_articol(titlu, continut, categorii=None, featured_media=None):
     res = r.json()
     return res.get('id'), res.get('link', '')
 
-def publica_facebook(text, link=''):
+def publica_facebook(text, link='', img_bytes=None, img_url=None):
     """Posteaza direct pe pagina de Facebook prin Graph API."""
     if not FB_PAGE_TOKEN or not FB_PAGE_ID:
         return None, "FB_PAGE_TOKEN sau FB_PAGE_ID lipsa in variabilele de mediu"
     try:
+        # Cu poza binara (trimisa de preot pe Telegram)
+        if img_bytes:
+            r = requests.post(
+                f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/photos",
+                data={'caption': text, 'access_token': FB_PAGE_TOKEN},
+                files={'source': ('photo.jpg', img_bytes, 'image/jpeg')},
+                timeout=60
+            )
+            res = r.json()
+            if 'id' in res or 'post_id' in res:
+                return res.get('post_id') or res.get('id'), ''
+            return None, res.get('error', {}).get('message', str(res))
+        # Cu poza din URL
+        if img_url:
+            r = requests.post(
+                f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/photos",
+                data={'caption': text, 'url': img_url, 'access_token': FB_PAGE_TOKEN},
+                timeout=30
+            )
+            res = r.json()
+            if 'id' in res or 'post_id' in res:
+                return res.get('post_id') or res.get('id'), ''
+            # Daca esueaza cu URL, fallback la text cu link
+        # Text simplu (cu sau fara link WP)
         payload = {'message': text, 'access_token': FB_PAGE_TOKEN}
         if link:
             payload['link'] = link
@@ -1114,9 +1138,11 @@ def webhook():
         else:
             art = pending_articol
             fb_text = art.get('fb_text', '')
-            fb_id, fb_err = publica_facebook(fb_text)
+            img_bytes = art.get('img_bytes')
+            img_url = art.get('imagine_url') if not img_bytes else None
+            fb_id, fb_err = publica_facebook(fb_text, img_bytes=img_bytes, img_url=img_url)
             if fb_id:
-                tg_send("✓ Publicat doar pe Facebook!")
+                tg_send("✓ Publicat pe Facebook!")
             else:
                 tg_send(f"⚠ Facebook eroare: {fb_err}")
             pending_articol = {}
@@ -1228,21 +1254,36 @@ def webhook():
         tg_send(f"Anul omagial: {get_an_omagial()}")
 
     elif photo:
-        tg_send("Am primit poza. Generez... (30-60 sec)")
-        def proc_photo():
-            try:
-                fb = tg_get_file(photo[-1]['file_id'])
-                if not fb:
-                    tg_send("Nu am putut descarca poza.")
-                    return
-                data = _gen_din_poza(base64.b64encode(fb).decode(), caption)
-                data['img_bytes'] = fb
-                data['categorii'] = [CAT_POSTARI_NOI, CAT_TRAIESTE]
-                data['publica_wp'] = True
-                trimite_spre_aprobare(data)
-            except Exception as e:
-                tg_send(f"Eroare poza: {str(e)}")
-        threading.Thread(target=proc_photo).start()
+        # Daca exista articol in asteptare, actualizeaza doar poza
+        if pending_articol:
+            def schimba_poza():
+                try:
+                    fb = tg_get_file(photo[-1]['file_id'])
+                    if fb:
+                        pending_articol['img_bytes'] = fb
+                        pending_articol.pop('imagine_url', None)
+                        tg_send("✓ Poza actualizata!\n\n/aproba - WP + Facebook\n/aproba_fb - doar Facebook\n/aproba_wp - doar WordPress")
+                    else:
+                        tg_send("Nu am putut descarca poza.")
+                except Exception as e:
+                    tg_send(f"Eroare poza: {str(e)}")
+            threading.Thread(target=schimba_poza).start()
+        else:
+            tg_send("Am primit poza. Generez... (30-60 sec)")
+            def proc_photo():
+                try:
+                    fb = tg_get_file(photo[-1]['file_id'])
+                    if not fb:
+                        tg_send("Nu am putut descarca poza.")
+                        return
+                    data = _gen_din_poza(base64.b64encode(fb).decode(), caption)
+                    data['img_bytes'] = fb
+                    data['categorii'] = [CAT_POSTARI_NOI, CAT_TRAIESTE]
+                    data['publica_wp'] = True
+                    trimite_spre_aprobare(data)
+                except Exception as e:
+                    tg_send(f"Eroare poza: {str(e)}")
+            threading.Thread(target=proc_photo).start()
 
     elif audio:
         tg_send("Am primit mesajul audio. Transcriu cu Whisper... (30-60 sec)")
