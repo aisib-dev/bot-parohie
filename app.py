@@ -397,76 +397,27 @@ def new_zi_data(dt):
         'warnings': [],
     }
 
-def parse_all_saints(html):
-    """Extrage toti sfintii din div.calendar-day de pe doxologia.ro."""
-    m = re.search(r'<div[^>]*class="[^"]*calendar-day[^"]*"[^>]*>([\s\S]*?)</div>', html, re.IGNORECASE)
-    if not m:
-        return []
-    section = m.group(1)
-    names = re.findall(r'<h[2-5][^>]*>([^<]{5,120})</h[2-5]>', section)
-    names += re.findall(r'<li[^>]*>([^<]{5,120})</li>', section)
-    names += re.findall(r'<p[^>]*>([^<]{10,120})</p>', section)
-    result = []
-    for n in names:
-        n = re.sub(r'\s+', ' ', n).strip()
-        if any(k in n.lower() for k in [
-            'sf.', 'sfânt', 'sfânta', 'sfântul', 'sfântă',
-            'cuvios', 'mucenic', 'ierarh', 'apostol', 'prooroc', 'cuv.',
-        ]):
-            result.append(n)
-    return list(dict.fromkeys(result))
-
-def parse_apostle(html):
-    """Extrage referinta si textul Apostolului din div.apostol-zilei."""
-    m = re.search(
-        r'<div[^>]*class="[^"]*apostol-zilei[^"]*"[^>]*>([\s\S]*?)'
-        r'(?=<div[^>]*class="[^"]*evangheli|</section)',
-        html, re.IGNORECASE
-    )
-    if not m:
-        return '', ''
-    section = m.group(1)
-    ref = ''
-    # Cauta referinta in link-uri (ex: "Ap. Fapte 17, 1-9")
-    for pat in [
-        r'<a[^>]*>\s*((?:Ap\.?\s+)?[A-Za-zÀ-žăâîșțĂÂÎȘȚ ]+\d+[^<]{0,30})</a>',
-        r'((?:Ap\.?\s+)?[A-Za-zÀ-žăâîșțĂÂÎȘȚ]+\s+\d+\s*,\s*\d+[^<\n]{0,30})',
-    ]:
-        rm = re.search(pat, section)
-        if rm:
-            ref = re.sub(r'<[^>]+>', '', rm.group(1)).strip()
-            if re.search(r'\d', ref):
-                break
-    texts = re.findall(r'<p[^>]*>([\s\S]*?)</p>', section)
-    text = ' '.join(re.sub(r'<[^>]+>', '', t).strip() for t in texts if len(re.sub(r'<[^>]+>', '', t).strip()) > 20)
-    return ref, re.sub(r'\s+', ' ', text)[:500]
-
-def parse_gospel(html):
-    """Extrage referinta si textul Evangheliei din div.evanghelie-zilei."""
-    m = re.search(
-        r'<div[^>]*class="[^"]*evanghelie-zilei[^"]*"[^>]*>([\s\S]*?)'
-        r'(?=<div[^>]*class="|</section)',
-        html, re.IGNORECASE
-    )
-    if not m:
-        return '', ''
-    section = m.group(1)
-    ref = ''
-    for pat in [
-        r'<a[^>]*>\s*((?:Ev\.?\s+)?[A-Za-zÀ-žăâîșțĂÂÎȘȚ ]+\d+[^<]{0,30})</a>',
-        r'((?:Ev\.?\s+)?[A-Za-zÀ-žăâîșțĂÂÎȘȚ]+\s+\d+\s*,\s*\d+[^<\n]{0,30})',
-    ]:
-        rm = re.search(pat, section)
-        if rm:
-            ref = re.sub(r'<[^>]+>', '', rm.group(1)).strip()
-            if re.search(r'\d', ref):
-                break
-    texts = re.findall(r'<p[^>]*>([\s\S]*?)</p>', section)
-    text = ' '.join(re.sub(r'<[^>]+>', '', t).strip() for t in texts if len(re.sub(r'<[^>]+>', '', t).strip()) > 20)
-    return ref, re.sub(r'\s+', ' ', text)[:500]
+def _parse_calendar_zi_section(section):
+    """Din continutul unui div.calendar-zi extrage sfinti, apostol, evanghelie."""
+    saints, ap_ref, ev_ref = [], '', ''
+    for link in re.finditer(r'<a[^>]+class="([^"]*)"[^>]*>\s*([^<]{3,150}?)\s*</a>', section):
+        cls, txt = link.group(1), link.group(2).strip()
+        if not txt:
+            continue
+        if 'ev-zi' in cls:
+            tl = txt.lower()
+            if tl.startswith('ap.') or tl.startswith('ap '):
+                ap_ref = txt
+            elif tl.startswith('ev.') or tl.startswith('ev '):
+                ev_ref = txt
+        else:
+            saints.append(txt)
+    return list(dict.fromkeys(saints)), ap_ref, ev_ref
 
 def fetch_doxologia_calendar(dt):
-    """Preia calendarul ortodox complet (sfinti, apostol, evanghelie) de pe doxologia.ro."""
+    """Preia calendarul ortodox complet de pe doxologia.ro.
+    Structura reala: div.calendar-zi cu linkuri sfinti + linkuri class=ev-zi pentru lecturi.
+    """
     zi_data = new_zi_data(dt)
     try:
         h = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
@@ -475,12 +426,30 @@ def fetch_doxologia_calendar(dt):
             zi_data['warnings'].append('doxologia.ro indisponibil')
             return zi_data
         html = r.text
-        zi_data['saints'] = parse_all_saints(html)
-        ap_ref, ap_text = parse_apostle(html)
-        ev_ref, ev_text = parse_gospel(html)
-        zi_data['apostle'] = {'reference': ap_ref, 'text': ap_text}
-        zi_data['gospel']  = {'reference': ev_ref, 'text': ev_text}
-        if not zi_data['saints']:
+
+        # Gaseste ziua curenta: ancora href="/DD-luna" cu textul DD,
+        # urmata de div.calendar-zi
+        day = dt.day
+        pat_day = (
+            r'href="/' + str(day) + r'-[a-z\-]+"[^>]*>\s*'
+            + str(day) + r'\s*</a>'
+            + r'[\s\S]{0,300}?'
+            + r'<div[^>]*class="[^"]*calendar-zi[^"]*"[^>]*>([\s\S]*?)</div>'
+        )
+        m = re.search(pat_day, html)
+        if not m:
+            # Fallback: primul calendar-zi din pagina (ziua curenta)
+            m = re.search(r'<div[^>]*class="[^"]*calendar-zi[^"]*"[^>]*>([\s\S]*?)</div>', html)
+        if not m:
+            zi_data['warnings'].append('Nu s-au gasit date pe doxologia.ro')
+            return zi_data
+
+        saints, ap_ref, ev_ref = _parse_calendar_zi_section(m.group(1))
+        zi_data['saints']  = saints
+        zi_data['apostle'] = {'reference': ap_ref, 'text': ''}
+        zi_data['gospel']  = {'reference': ev_ref, 'text': ''}
+
+        if not saints:
             zi_data['warnings'].append('Nu s-au gasit sfinti pe doxologia.ro')
         if not ap_ref:
             zi_data['warnings'].append('Apostolul nu a putut fi extras')
@@ -591,23 +560,21 @@ def get_imagine_doxologia(query=''):
     return get_imagine_fallback(query)
 
 def get_imagine_fallback(query=''):
-    # Imagini verificate de pe Wikimedia Commons - stabile permanent
+    # Imagini de pe commons.wikimedia.org - accesibile prin URL direct
     imagini = {
-        'craciun':   'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8c/Nativity_icon_Sinai_12th_century.jpg/800px-Nativity_icon_Sinai_12th_century.jpg',
-        'paste':     'https://upload.wikimedia.org/wikipedia/commons/thumb/0/06/Anastasis_mosaic%2C_Chora_church%2C_Constantinople%2C_14th_century.jpg/800px-Anastasis_mosaic%2C_Chora_church%2C_Constantinople%2C_14th_century.jpg',
-        'florii':    'https://upload.wikimedia.org/wikipedia/commons/thumb/d/d3/Entry_into_Jerusalem_icon.jpg/800px-Entry_into_Jerusalem_icon.jpg',
-        'boboteaza': 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6f/Baptism_of_Christ%2C_mosaic%2C_Baptistry_of_Neon%2C_Ravenna_%285th_century%29.jpg/800px-Baptism_of_Christ%2C_mosaic%2C_Baptistry_of_Neon%2C_Ravenna_%285th_century%29.jpg',
-        'post':      'https://upload.wikimedia.org/wikipedia/commons/thumb/5/5b/Christ_in_the_Wilderness_-_Ivan_Kramskoy_-_1872.jpg/800px-Christ_in_the_Wilderness_-_Ivan_Kramskoy_-_1872.jpg',
-        'maica':     'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1b/Theotokos_of_Vladimir.jpg/600px-Theotokos_of_Vladimir.jpg',
-        'cruce':     'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0d/The_Crucifixion_icon%2C_Novgorod_school%2C_late_15c.jpg/600px-The_Crucifixion_icon%2C_Novgorod_school%2C_late_15c.jpg',
-        'nicolae':   'https://upload.wikimedia.org/wikipedia/commons/thumb/2/2f/Nicholas_of_Myra_icon.jpg/600px-Nicholas_of_Myra_icon.jpg',
-        'andrei':    'https://upload.wikimedia.org/wikipedia/commons/thumb/4/4f/Saint_Andrew_the_Apostle_%28icon%29.jpg/600px-Saint_Andrew_the_Apostle_%28icon%29.jpg',
-        'vasile':    'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Saint_Basil_icon.jpg/600px-Saint_Basil_icon.jpg',
-        'botez':     'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6f/Baptism_of_Christ%2C_mosaic%2C_Baptistry_of_Neon%2C_Ravenna_%285th_century%29.jpg/800px-Baptism_of_Christ%2C_mosaic%2C_Baptistry_of_Neon%2C_Ravenna_%285th_century%29.jpg',
-        'schimbare': 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c8/Transfiguration_icon.jpg/600px-Transfiguration_icon.jpg',
-        'inaltare':  'https://upload.wikimedia.org/wikipedia/commons/thumb/5/5d/Ascension_of_Jesus_Christ_icon.jpg/600px-Ascension_of_Jesus_Christ_icon.jpg',
-        'duminica':  'https://upload.wikimedia.org/wikipedia/commons/thumb/d/d9/Christ_Pantocrator_mosaic_from_Hagia_Sophia.jpg/600px-Christ_Pantocrator_mosaic_from_Hagia_Sophia.jpg',
-        'default':   'https://upload.wikimedia.org/wikipedia/commons/thumb/9/95/Mitropolia_Ardealului_Sibiu.jpg/800px-Mitropolia_Ardealului_Sibiu.jpg',
+        'craciun':   'https://commons.wikimedia.org/wiki/Special:FilePath/Nativity_icon_Sinai_12th_century.jpg',
+        'paste':     'https://commons.wikimedia.org/wiki/Special:FilePath/Anastasis_mosaic,_Chora_church,_Constantinople,_14th_century.jpg',
+        'florii':    'https://commons.wikimedia.org/wiki/Special:FilePath/Entry_into_Jerusalem_(icon).jpg',
+        'boboteaza': 'https://commons.wikimedia.org/wiki/Special:FilePath/Baptism_of_Christ,_mosaic,_Baptistry_of_Neon,_Ravenna_(5th_century).jpg',
+        'post':      'https://commons.wikimedia.org/wiki/Special:FilePath/Christ_in_the_Wilderness_-_Ivan_Kramskoy_-_1872.jpg',
+        'maica':     'https://commons.wikimedia.org/wiki/Special:FilePath/Theotokos_of_Vladimir.jpg',
+        'cruce':     'https://commons.wikimedia.org/wiki/Special:FilePath/The_Crucifixion_icon,_Novgorod_school,_late_15c.jpg',
+        'nicolae':   'https://commons.wikimedia.org/wiki/Special:FilePath/Nicholas_of_Myra_icon_(Jaroslavl,_13_c.).jpg',
+        'andrei':    'https://commons.wikimedia.org/wiki/Special:FilePath/Saint_Andrew_the_Apostle_(icon).jpg',
+        'schimbare': 'https://commons.wikimedia.org/wiki/Special:FilePath/Transfiguration_by_Feofan_Grek.jpg',
+        'inaltare':  'https://commons.wikimedia.org/wiki/Special:FilePath/Ascension_of_Jesus_Christ_icon_(Yaroslavl,_16th_c).jpg',
+        'duminica':  'https://commons.wikimedia.org/wiki/Special:FilePath/Christ_Pantocrator_mosaic_from_Hagia_Sophia.jpg',
+        'default':   'https://commons.wikimedia.org/wiki/Special:FilePath/Mitropolia_Ardealului_Sibiu.jpg',
     }
     q = query.lower()
     for k, v in imagini.items():
