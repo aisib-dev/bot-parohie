@@ -628,11 +628,11 @@ def genereaza_articol_zilnic(extra_text=''):
         return data
 
     except Exception as e:
-    import traceback
-    eroare = traceback.format_exc()
-    print(f"EROARE GENERARE: {eroare}")
-    tg_send(f"Eroare generare: {str(e)}\n{eroare[:200]}")
-    return None
+        import traceback
+        eroare = traceback.format_exc()
+        print(f"EROARE GENERARE: {eroare}")
+        tg_send(f"Eroare generare: {str(e)}\n{eroare[:200]}")
+        return None
 
 # ============================================================
 #  GENERATOARE SPECIFICE
