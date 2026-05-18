@@ -182,6 +182,9 @@ style="color:#5a2d0c;text-decoration:none;">Basilica.ro</a>
 &nbsp; | &nbsp;
 <a href="https://ziarullumina.ro" target="_blank"
 style="color:#5a2d0c;text-decoration:none;">Ziarul Lumina</a>
+&nbsp; | &nbsp;
+<a href="https://www.bibliortodoxa.ro" target="_blank"
+style="color:#5a2d0c;text-decoration:none;">Biblia Ortodoxa</a>
 </p>
 
 <p style="margin:10px 0 0 0;font-style:italic;color:#8B0000;font-size:13px;
@@ -329,6 +332,45 @@ def scrape_sfinti():
         return sfinti[:6]
     except:
         return []
+
+def _ref_to_bibliortodoxa_url(ref):
+    """Transforma o referinta biblica in URL bibliortodoxa.ro."""
+    carti = {
+        'matei': 'matei', 'marcu': 'marcu', 'luca': 'luca', 'ioan': 'sf-evanghelist-loan',
+        'fapte': 'faptele-apostolilor', 'romani': 'romani', 'corinteni': 'corinteni',
+        'galateni': 'galateni', 'efeseni': 'efeseni', 'filipeni': 'filipeni',
+        'coloseni': 'coloseni', 'tesaloniceni': 'tesaloniceni', 'timotei': 'timotei',
+        'tit': 'tit', 'evrei': 'evrei', 'iacov': 'iacov', 'petru': 'petru',
+        'psalm': 'psalmii', 'psalmi': 'psalmii', 'pilde': 'pilde',
+        'geneza': 'geneza', 'iesire': 'iesire', 'isaia': 'isaia',
+    }
+    ref_lower = ref.lower()
+    for cheie, slug in carti.items():
+        if cheie in ref_lower:
+            m = re.search(r'(\d+)', ref)
+            capitol = m.group(1) if m else '1'
+            return f"https://www.bibliortodoxa.ro/capitole/{slug}-{capitol}"
+    return "https://www.bibliortodoxa.ro"
+
+def scrape_verset_bibliortodoxa(ref):
+    """Preia textul unui verset de pe bibliortodoxa.ro."""
+    try:
+        url = _ref_to_bibliortodoxa_url(ref)
+        h = {'User-Agent': 'Mozilla/5.0'}
+        r = requests.get(url, headers=h, timeout=10)
+        if r.status_code != 200:
+            return ''
+        # Extrage versetele din pagina
+        versete = re.findall(r'<p[^>]*class="[^"]*verset[^"]*"[^>]*>(.*?)</p>', r.text, re.IGNORECASE | re.DOTALL)
+        if not versete:
+            versete = re.findall(r'<div[^>]*class="[^"]*text[^"]*"[^>]*>(.*?)</div>', r.text, re.IGNORECASE | re.DOTALL)
+        if versete:
+            text = re.sub(r'<[^>]+>', '', versete[0]).strip()
+            text = re.sub(r'\s+', ' ', text)
+            return text[:400]
+    except:
+        pass
+    return ''
 
 def scrape_apostol_evanghelie():
     """Preia Apostolul si Evanghelia de pe doxologia.ro/lecturile-zilei"""
@@ -748,6 +790,7 @@ REGULI DE SCRIERE:
 7. Facebook: 220-280 cuvinte, ton cald-uman, cu verset si indemn la reflectie sau rugaciune
 8. Structura AERISITA: paragrafe scurte (3-5 randuri), spatii intre sectiuni, nu ziduri de text
 9. HTML elegant: foloseste <p> pentru fiecare paragraf, <blockquote> stilizat pentru citate
+10. BIBLIA: Foloseste EXCLUSIV traducerea ortodoxa romana (Biblia sau Sfanta Scriptura, Editura Institutului Biblic, Bucuresti). Sursa de referinta: www.bibliortodoxa.ro. Cand citezi un verset, respecta exact textul din aceasta traducere.
 
 Raspunzi EXCLUSIV cu JSON valid. Zero text in afara JSON. Zero markdown in afara JSON.
 CRITIC: In valorile JSON, HTML-ul trebuie scris PE O SINGURA LINIE, fara newline-uri literale. Foloseste spatii intre taguri HTML, nu enter/newline."""
@@ -770,6 +813,14 @@ def genereaza_articol_zilnic(extra_text=''):
         pilda, solomon = scrape_pilde_solomon()
         apostol   = apostol or pilda
         evanghelie = evanghelie or solomon
+
+    # Incearca sa preia textul complet de pe bibliortodoxa.ro
+    text_apostol = scrape_verset_bibliortodoxa(apostol) if apostol else ''
+    text_evanghelie = scrape_verset_bibliortodoxa(evanghelie) if evanghelie else ''
+    if text_apostol:
+        apostol = f"{apostol} — {text_apostol}"
+    if text_evanghelie:
+        evanghelie = f"{evanghelie} — {text_evanghelie}"
 
     sfinti_str = ', '.join(sfinti) if sfinti else 'Sfintii zilei'
     s_extra = f'\nGandul preotului (integreaza natural, nu fortat): {extra_text}' if extra_text else ''
