@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+﻿from flask import Flask, request, jsonify
 from openai import OpenAI
 import requests
 import base64
@@ -549,6 +549,12 @@ def new_zi_data(dt):
         'warnings': [],
     }
 
+def _saint_names(saints):
+    """Returneaza lista de nume sfinti. Suporta string-uri si dict-uri {name, url}."""
+    if not saints:
+        return []
+    return [s['name'] if isinstance(s, dict) else s for s in saints]
+
 def _parse_calendar_zi_section(section):
     """Din continutul unui div.calendar-zi extrage sfinti, apostol, evanghelie."""
     saints, ap_ref, ev_ref = [], '', ''
@@ -971,9 +977,10 @@ def generate_pastoral_variants(zi_data):
             results[key] = ''
     return results
 
-def build_facebook_post(zi_data):
+def build_facebook_post(zi_data, wp_link=''):
     """Construieste postarea FB structurata cu emoji-uri, conform formatului pastoral."""
     saints    = zi_data.get('saints', [])
+    saints_names = _saint_names(saints)
     ap_ref    = zi_data['apostle'].get('reference', '')
     ev_ref    = zi_data['gospel'].get('reference', '')
     v_ref     = zi_data['selected_verse'].get('reference', '')
@@ -981,17 +988,19 @@ def build_facebook_post(zi_data):
     reflection = zi_data.get('pastoral_reflection', '')
 
     parts = []
-    if saints:
-        parts.append(f"🕊️ Sfinții zilei\nAstăzi îi pomenim pe: {', '.join(saints)}.")
+    if saints_names:
+        parts.append(f"🕊️ Sfinții zilei\nAstăzi îi pomenim pe: {', '.join(saints_names)}.")
     if ap_ref:
         parts.append(f"📖 Apostolul zilei\n{ap_ref}")
     if ev_ref:
         parts.append(f"✝️ Evanghelia zilei\n{ev_ref}")
     if v_text and v_ref:
-        parts.append(f'„{v_text}”\n({v_ref})')
+        parts.append(f'„{v_text}"\n({v_ref})')
     if reflection:
         parts.append(f"Cuvânt de folos:\n{reflection}")
     parts.append("🙏 Doamne, ajută-ne să întâmpinăm ziua cu pace, credință și inimă bună.")
+    if wp_link:
+        parts.append(f"Citiți pe site viețile sfinților și pericopele zilei:\n{wp_link}")
     parts.append("#ParohiaCetate2 #CalendarOrtodox #SfintiiZilei #EvangheliaZilei")
     return '\n\n'.join(parts)
 
@@ -1072,6 +1081,65 @@ def _get_inline_keyboard_cuvant():
         ]
     }
 
+def _get_inline_keyboard_main():
+    """Keyboard principal de actiuni dupa generare articol."""
+    return {
+        'inline_keyboard': [
+            [
+                {'text': '1️⃣ Scurt', 'callback_data': 'alege_scurt'},
+                {'text': '2️⃣ Duhovnicesc', 'callback_data': 'alege_duhovnicesc'},
+                {'text': '3️⃣ Catehetic', 'callback_data': 'alege_catehetic'},
+            ],
+            [
+                {'text': '🔁 Regen cuvânt', 'callback_data': 'regen_cuvant'},
+            ],
+            [
+                {'text': '✅ Publică pe Facebook', 'callback_data': 'publica_fb'},
+                {'text': '🌐 Draft WordPress', 'callback_data': 'draft_wp'},
+            ],
+            [
+                {'text': '🚀 Publică direct pe WP', 'callback_data': 'publica_wp_direct'},
+                {'text': '✏️ Editează WP', 'callback_data': 'editeaza_wp_btn'},
+            ],
+            [
+                {'text': '🔁 Regen WP', 'callback_data': 'regen_wp'},
+                {'text': '🔁 Regen FB', 'callback_data': 'regen_fb'},
+                {'text': '🔎 Linkuri', 'callback_data': 'verifica_linkuri'},
+            ],
+            [
+                {'text': '❌ Respinge', 'callback_data': 'respinge_btn'},
+            ],
+        ]
+    }
+
+def _get_inline_keyboard_draft():
+    """Keyboard dupa crearea unui draft WordPress."""
+    return {
+        'inline_keyboard': [
+            [
+                {'text': '🚀 Publică draftul', 'callback_data': 'publica_draft'},
+                {'text': '✏️ Editează draftul', 'callback_data': 'editeaza_wp_btn'},
+            ],
+            [
+                {'text': '🔁 Regenerează draftul', 'callback_data': 'regen_wp'},
+                {'text': '🗑️ Șterge draftul', 'callback_data': 'sterge_draft'},
+            ],
+            [
+                {'text': '✅ FB cu link articol', 'callback_data': 'publica_fb'},
+            ],
+        ]
+    }
+
+def _get_inline_keyboard_post_wp():
+    """Keyboard dupa publicare WordPress: ofera Facebook cu link."""
+    return {
+        'inline_keyboard': [
+            [
+                {'text': '✅ Publică pe Facebook cu link WP', 'callback_data': 'publica_fb'},
+            ],
+        ]
+    }
+
 # ============================================================
 #  VIDEO RESURSE (Saptamana Mare)
 # ============================================================
@@ -1117,7 +1185,7 @@ def wp_auth():
     enc = base64.b64encode(f"{WP_USER}:{WP_PASS}".encode()).decode()
     return {'Authorization': f'Basic {enc}', 'Content-Type': 'application/json'}
 
-def publica_articol(titlu, continut, categorii=None, featured_media=None):
+def publica_articol(titlu, continut, categorii=None, featured_media=None, status='publish'):
     if categorii is None:
         categorii = [CAT_TRAIESTE]
     corp = (
@@ -1130,7 +1198,7 @@ def publica_articol(titlu, continut, categorii=None, featured_media=None):
     data = {
         'title': titlu,
         'content': continut_final,
-        'status': 'publish',
+        'status': status,
         'categories': categorii,
         'tags': [],
     }
@@ -1144,95 +1212,116 @@ def publica_articol(titlu, continut, categorii=None, featured_media=None):
     res = r.json()
     return res.get('id'), res.get('link', '')
 
+def actualizeaza_articol_wp(post_id, titlu=None, continut=None, categorii=None,
+                            featured_media=None, status=None):
+    """Actualizeaza un articol WordPress existent via PATCH."""
+    data = {}
+    if titlu:
+        data['title'] = titlu
+    if continut is not None:
+        corp = (
+            '<div style="font-family:Georgia,serif;color:#2c1a00;line-height:1.9;'
+            'font-size:15px;max-width:780px;">'
+            + _style_articol_html(continut)
+            + '</div>'
+        )
+        data['content'] = corp + WIDGET_DOXOLOGIA + SEMNATURA_HTML + get_bloc_resurse()
+    if categorii:
+        data['categories'] = categorii
+    if featured_media:
+        data['featured_media'] = featured_media
+    if status:
+        data['status'] = status
+    r = requests.patch(
+        f"{WP_URL}/wp-json/wp/v2/posts/{post_id}",
+        json=data, headers=wp_auth(), timeout=30
+    )
+    print(f"WP PATCH {post_id}: {r.status_code} - {r.text[:200]}")
+    res = r.json()
+    return res.get('id'), res.get('link', '')
+
+def validate_wordpress_ready(data):
+    """Verifica daca articolul e pregatit pentru publicare directa. Returneaza (ok, [erori])."""
+    errors = []
+    zi_data = data.get('zi_data', {})
+    if not data.get('titlu_wp', '').strip():
+        errors.append('Titlul articolului lipsește')
+    if not data.get('continut_wp', '').strip():
+        errors.append('Conținutul articolului este gol')
+    if not zi_data.get('saints'):
+        errors.append('Sfinții zilei nu au fost extrași')
+    if not zi_data.get('apostle', {}).get('reference'):
+        errors.append('Referința Apostolului lipsește')
+    if not zi_data.get('gospel', {}).get('reference'):
+        errors.append('Referința Evangheliei lipsește')
+    if not zi_data.get('selected_verse', {}).get('verified'):
+        errors.append('Versetul nu este verificat pe Biblia Ortodoxă')
+    for tag in ['<script', '<iframe', 'javascript:']:
+        if tag.lower() in data.get('continut_wp', '').lower():
+            errors.append(f'Conținut nesigur detectat: {tag}')
+    return len(errors) == 0, errors
+
+def test_wordpress():
+    """Verifica conexiunea WordPress si credentialele. Returneaza dict cu statusuri."""
+    result = {'connection': False, 'auth': False, 'can_draft': False,
+              'user': '', 'error': '', 'post_count': 0}
+    try:
+        r = requests.get(
+            f"{WP_URL}/wp-json/wp/v2/posts?per_page=1",
+            headers=wp_auth(), timeout=10
+        )
+        result['connection'] = True
+        if r.status_code == 200:
+            result['auth'] = True
+            posts = r.json()
+            result['post_count'] = len(posts)
+        elif r.status_code == 401:
+            result['error'] = 'Autentificare eșuată (401)'
+        else:
+            result['error'] = f'HTTP {r.status_code}'
+    except Exception as e:
+        result['error'] = str(e)[:80]
+        return result
+    # Check user
+    try:
+        r2 = requests.get(
+            f"{WP_URL}/wp-json/wp/v2/users/me",
+            headers=wp_auth(), timeout=8
+        )
+        if r2.status_code == 200:
+            u = r2.json()
+            result['user'] = u.get('name', u.get('slug', ''))
+            result['can_draft'] = True
+    except:
+        pass
+    return result
+
 def test_facebook_token():
-    """Verifica token-ul Facebook: validitate, pagina, permisiuni necesare."""
-    PERMISIUNI_NECESARE = ['pages_manage_posts', 'pages_read_engagement', 'pages_show_list']
+    """Verifica token-ul Facebook: validitate si test postare directa."""
     if not FB_PAGE_TOKEN:
         return "❌ <b>FB_PAGE_TOKEN</b> lipsește din variabilele de mediu Render."
     if not FB_PAGE_ID:
         return "❌ <b>FB_PAGE_ID</b> lipsește din variabilele de mediu Render."
-
     lines = ["<b>🔍 Diagnostic token Facebook</b>\n"]
-
-    # 1. Verifică dacă token-ul e valid și ce pagină e
     try:
-        r = requests.get(
-            f"https://graph.facebook.com/v20.0/me",
-            params={'access_token': FB_PAGE_TOKEN, 'fields': 'id,name'},
-            timeout=10
-        )
+        r = requests.get("https://graph.facebook.com/v20.0/me",
+            params={'access_token': FB_PAGE_TOKEN, 'fields': 'id,name,category'}, timeout=10)
         me = r.json()
         if 'error' in me:
             code = me['error'].get('code', '?')
             msg  = me['error'].get('message', '')
             lines.append(f"❌ Token invalid (#{code}): {msg}")
-            lines.append("\n<b>Soluție:</b> regenerează token-ul în Graph API Explorer cu permisiunile corecte.")
+            lines.append("\n<b>Soluție:</b>\n1. Graph API Explorer → GET /me/accounts → copiază access_token al paginii\n2. Pune-l în Render → FB_PAGE_TOKEN → Save, rebuild, and deploy")
             return '\n'.join(lines)
-        lines.append(f"✅ Token valid — pagina: <b>{me.get('name','?')}</b> (ID: {me.get('id','?')})")
+        tip = me.get('category', 'Page')
+        lines.append(f"✅ Token valid — <b>{me.get('name','?')}</b> ({tip})")
+        lines.append(f"   ID token: {me.get('id','?')} | ID pagina setat: {FB_PAGE_ID}")
+        if me.get('id') != FB_PAGE_ID:
+            lines.append("⚠️ ID-ul din token diferă de FB_PAGE_ID — verifică variabila FB_PAGE_ID pe Render!")
     except Exception as e:
         lines.append(f"❌ Eroare rețea: {str(e)}")
         return '\n'.join(lines)
-
-    # 2. Verifică permisiunile acordate
-    try:
-        r2 = requests.get(
-            f"https://graph.facebook.com/v20.0/me/permissions",
-            params={'access_token': FB_PAGE_TOKEN},
-            timeout=10
-        )
-        perms_data = r2.json().get('data', [])
-        granted = {p['permission'] for p in perms_data if p.get('status') == 'granted'}
-
-        lines.append("\n<b>Permisiuni necesare:</b>")
-        toate_ok = True
-        for p in PERMISIUNI_NECESARE:
-            if p in granted:
-                lines.append(f"  ✅ {p}")
-            else:
-                lines.append(f"  ❌ {p} — <b>LIPSEȘTE</b>")
-                toate_ok = False
-
-        if toate_ok:
-            lines.append("\n✅ <b>Toate permisiunile sunt OK!</b>")
-            # 3. Test post real (feed fără poză, sters imediat)
-            lines.append("\n<b>Test postare:</b> încerc un post de test...")
-            r3 = requests.post(
-                f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/feed",
-                data={
-                    'message': '🔧 Test bot parohial — mesaj de test, se șterge automat.',
-                    'access_token': FB_PAGE_TOKEN,
-                    'published': 'false',
-                },
-                timeout=15
-            )
-            res3 = r3.json()
-            if 'id' in res3:
-                post_id = res3['id']
-                lines.append(f"  ✅ Post creat cu succes (ID: {post_id})")
-                # Sterge postul de test
-                requests.delete(
-                    f"https://graph.facebook.com/v20.0/{post_id}",
-                    params={'access_token': FB_PAGE_TOKEN},
-                    timeout=10
-                )
-                lines.append("  🗑 Post de test șters automat.")
-                lines.append("\n🎉 <b>Facebook funcționează perfect!</b> Poți folosi /aproba_fb.")
-            else:
-                err = res3.get('error', {})
-                lines.append(f"  ❌ Eroare postare (#{err.get('code','?')}): {err.get('message','')}")
-        else:
-            lines.append(
-                "\n<b>Soluție:</b>\n"
-                "1. Mergi la developers.facebook.com/tools/explorer\n"
-                "2. Selectează aplicația ta\n"
-                "3. Bifează permisiunile marcate cu ❌ de mai sus\n"
-                "4. Click <b>Get Page Access Token</b> → alege pagina\n"
-                "5. Extinde token-ul (butonul ℹ → Extend Access Token)\n"
-                "6. Actualizează <code>FB_PAGE_TOKEN</code> în Render → Environment"
-            )
-    except Exception as e:
-        lines.append(f"❌ Eroare verificare permisiuni: {str(e)}")
-
+    lines.append("\n🎉 <b>Token Facebook valid!</b> Poți folosi /aproba_fb sau butonul ✅ din Telegram.")
     return '\n'.join(lines)
 
 
@@ -1361,7 +1450,7 @@ def trimite_spre_aprobare(articol):
 
     if zi_data:
         preview = build_telegram_preview(zi_data, articol.get('titlu_wp', ''))
-        keyboard = _get_inline_keyboard_cuvant()
+        keyboard = _get_inline_keyboard_main()
     else:
         sfinti_link = ''
         if articol.get('sfinti_list'):
@@ -1993,10 +2082,9 @@ def webhook():
                 if not text_ales:
                     tg_answer_callback(cb_id, 'Varianta indisponibila.')
                 else:
-                    # Reconstruieste fb_text cu varianta aleasa
                     zi['pastoral_reflection'] = text_ales
                     pending_articol['zi_data'] = zi
-                    fb_text_nou = build_facebook_post(zi)
+                    fb_text_nou = build_facebook_post(zi, pending_articol.get('wp_link', ''))
                     if fb_text_nou:
                         autor_f, citat_f = get_citat_familie()
                         pending_articol['fb_text'] = fb_text_nou + f'\n\n✦ {autor_f}:\n„{citat_f}"'
@@ -2005,8 +2093,299 @@ def webhook():
                     tg_answer_callback(cb_id, f'✓ Ales: {label_map[key_ales]}')
                     tg_send(
                         f'<b>✓ Cuvânt de folos ales — {label_map[key_ales]}:</b>\n\n{text_ales}\n\n'
-                        f'<i>Textul Facebook a fost actualizat. Folosește /aproba pentru publicare.</i>'
+                        f'<i>Textul Facebook actualizat.</i>'
                     )
+
+            # ── Draft WordPress ──────────────────────────────────────
+            elif cb_data == 'draft_wp':
+                if not pending_articol:
+                    tg_answer_callback(cb_id, 'Nu există articol.')
+                else:
+                    tg_answer_callback(cb_id, 'Creez draft...')
+                    def _draft_wp_bg():
+                        global pending_articol
+                        art = pending_articol
+                        if not art:
+                            tg_send("Nu există articol în așteptare.")
+                            return
+                        try:
+                            post_id = art.get('wp_post_id')
+                            continut = art.get('continut_wp', '') + art.get('video_bloc', '')
+                            cat = art.get('categorii', [CAT_TRAIESTE])
+                            if post_id:
+                                pid, link = actualizeaza_articol_wp(post_id, art.get('titlu_wp'), continut, cat)
+                            else:
+                                pid, link = publica_articol(art['titlu_wp'], continut, cat, status='draft')
+                            if pid:
+                                pending_articol['wp_post_id'] = pid
+                                pending_articol['wp_link'] = link or f"{WP_URL}/?p={pid}"
+                                _save_pending(pending_articol)
+                                edit_link = f"{WP_URL}/wp-admin/post.php?post={pid}&action=edit"
+                                actiune = "actualizat" if post_id else "creat"
+                                tg_send(
+                                    f"🌐 <b>Draft WordPress {actiune}</b>\n\n"
+                                    f"<b>Titlu:</b> {art.get('titlu_wp','')}\n"
+                                    f"<b>Status:</b> draft\n\n"
+                                    f"<b>Link editare:</b> {edit_link}",
+                                    reply_markup=_get_inline_keyboard_draft()
+                                )
+                            else:
+                                tg_send("❌ Eroare la crearea draftului WordPress.")
+                        except Exception as e:
+                            tg_send(f"❌ Eroare draft: {str(e)}")
+                    threading.Thread(target=_draft_wp_bg, daemon=True).start()
+
+            # ── Publică direct pe WP ─────────────────────────────────
+            elif cb_data == 'publica_wp_direct':
+                art = pending_articol
+                if not art:
+                    tg_answer_callback(cb_id, 'Nu există articol.')
+                else:
+                    ok_val, erori = validate_wordpress_ready(art)
+                    if not ok_val:
+                        tg_answer_callback(cb_id, '⚠ Validare eșuată')
+                        tg_send(
+                            "⚠️ <b>Nu pot publica direct — validare eșuată:</b>\n"
+                            + '\n'.join(f'• {e}' for e in erori)
+                            + '\n\nPoți folosi 🌐 Draft WordPress sau /aproba pentru publicare forțată.'
+                        )
+                    else:
+                        tg_answer_callback(cb_id, 'Publicând pe WP...')
+                        def _publica_wp_direct_bg():
+                            global pending_articol
+                            art = pending_articol
+                            try:
+                                post_id = art.get('wp_post_id')
+                                media_id = None
+                                if art.get('img_bytes'):
+                                    try: media_id, _ = upload_media(art['img_bytes'], 'foto.jpg', 'image/jpeg')
+                                    except: pass
+                                elif art.get('imagine_url'):
+                                    try:
+                                        ir = requests.get(art['imagine_url'], timeout=10)
+                                        if ir.status_code == 200:
+                                            media_id, _ = upload_media(ir.content, 'foto.jpg', 'image/jpeg')
+                                    except: pass
+                                continut = art.get('continut_wp', '') + art.get('video_bloc', '')
+                                cat = art.get('categorii', [CAT_TRAIESTE])
+                                if post_id:
+                                    pid, link = actualizeaza_articol_wp(post_id, art.get('titlu_wp'), continut, cat, media_id, status='publish')
+                                else:
+                                    pid, link = publica_articol(art['titlu_wp'], continut, cat, media_id, status='publish')
+                                if link:
+                                    pending_articol['wp_post_id'] = pid
+                                    pending_articol['wp_link'] = link
+                                    _save_pending(pending_articol)
+                                    art_date = art.get('data_generare', datetime.datetime.now().strftime('%Y-%m-%d'))
+                                    _update_istoric_status(art_date, 'publicat_wp')
+                                    tg_send(
+                                        f"✅ <b>Publicat pe WordPress!</b>\n{link}\n\n"
+                                        f"Acum poți publica și pe Facebook cu link-ul articolului.",
+                                        reply_markup=_get_inline_keyboard_post_wp()
+                                    )
+                                else:
+                                    tg_send("❌ Eroare publicare WordPress.")
+                            except Exception as e:
+                                tg_send(f"❌ Eroare: {str(e)}")
+                        threading.Thread(target=_publica_wp_direct_bg, daemon=True).start()
+
+            # ── Publică draftul existent ─────────────────────────────
+            elif cb_data == 'publica_draft':
+                art = pending_articol
+                post_id = art.get('wp_post_id') if art else None
+                if not post_id:
+                    tg_answer_callback(cb_id, 'Nu există draft salvat.')
+                else:
+                    tg_answer_callback(cb_id, 'Publicând draftul...')
+                    def _publica_draft_bg():
+                        global pending_articol
+                        try:
+                            pid, link = actualizeaza_articol_wp(post_id, status='publish')
+                            if link:
+                                pending_articol['wp_link'] = link
+                                _save_pending(pending_articol)
+                                art_date = pending_articol.get('data_generare', datetime.datetime.now().strftime('%Y-%m-%d'))
+                                _update_istoric_status(art_date, 'publicat_wp')
+                                tg_send(
+                                    f"✅ <b>Draft publicat!</b>\n{link}",
+                                    reply_markup=_get_inline_keyboard_post_wp()
+                                )
+                            else:
+                                tg_send("❌ Eroare la publicarea draftului.")
+                        except Exception as e:
+                            tg_send(f"❌ Eroare: {str(e)}")
+                    threading.Thread(target=_publica_draft_bg, daemon=True).start()
+
+            # ── Publică pe Facebook ──────────────────────────────────
+            elif cb_data == 'publica_fb':
+                art = pending_articol
+                if not art:
+                    tg_answer_callback(cb_id, 'Nu există articol.')
+                else:
+                    verse_ok = art.get('zi_data', {}).get('selected_verse', {}).get('verified', True)
+                    if not verse_ok:
+                        tg_answer_callback(cb_id, '⛔ Verset neverificat')
+                        tg_send("⛔ Facebook BLOCAT — versetul biblic nu a fost verificat pe bibliaortodoxa.ro.\nVerifică manual sau folosește /aproba_fb după corectare.")
+                    else:
+                        tg_answer_callback(cb_id, 'Publicând pe Facebook...')
+                        def _publica_fb_bg():
+                            global pending_articol
+                            art = pending_articol
+                            try:
+                                wp_link = art.get('wp_link', '')
+                                fb_text = art.get('fb_text', '')
+                                if wp_link and wp_link not in fb_text:
+                                    fb_text = fb_text + f'\n\nCitiți pe site viețile sfinților și pericopele zilei:\n{wp_link}'
+                                img_bytes = art.get('img_bytes')
+                                img_url = art.get('imagine_url') if not img_bytes else None
+                                fb_id, fb_err = publica_facebook(fb_text, wp_link, img_bytes=img_bytes, img_url=img_url)
+                                if fb_id:
+                                    art_date = art.get('data_generare', datetime.datetime.now().strftime('%Y-%m-%d'))
+                                    _update_istoric_status(art_date, 'publicat_fb')
+                                    tg_send("✅ <b>Publicat pe Facebook!</b>")
+                                else:
+                                    tg_send(f"⚠ Eroare Facebook: {fb_err}")
+                            except Exception as e:
+                                tg_send(f"❌ Eroare: {str(e)}")
+                        threading.Thread(target=_publica_fb_bg, daemon=True).start()
+
+            # ── Regenerează articol WP ───────────────────────────────
+            elif cb_data == 'regen_wp':
+                tg_answer_callback(cb_id, 'Regenerez articolul WP...')
+                def _regen_wp_bg():
+                    global pending_articol
+                    art = pending_articol
+                    zi = art.get('zi_data', {})
+                    if not zi:
+                        tg_send("Nu există date liturgice — folosește /regenereaza.")
+                        return
+                    sfinti = _saint_names(zi.get('saints', []))
+                    ap_ref = zi.get('apostle', {}).get('reference', '')
+                    ev_ref = zi.get('gospel', {}).get('reference', '')
+                    apostol = ap_ref or zi.get('apostle', {}).get('text', '')
+                    evanghelie = ev_ref or zi.get('gospel', {}).get('text', '')
+                    try:
+                        dt = get_azi()
+                        zi_str = get_zi_romana(dt)
+                        sfinti_str = ', '.join(sfinti) if sfinti else 'Sfintii zilei'
+                        an_om = get_an_omagial()
+                        autor_f, citat_f = get_citat_familie()
+                        s_an = f'\nAnul omagial: {an_om} - integreaza un gand scurt despre familie.'
+                        s_familie = f'\nCitat despre familie: {autor_f}: "{citat_f}"'
+                        d = _gen_zi_obisnuita(zi_str, sfinti_str, apostol, evanghelie, '', '', s_an + s_familie)
+                        pending_articol['titlu_wp'] = d.get('titlu_wp', art.get('titlu_wp', ''))
+                        pending_articol['continut_wp'] = _bloc_sfinti(zi.get('saints', [])) + d.get('continut_wp', '') + get_bloc_familie()
+                        _save_pending(pending_articol)
+                        tg_send(
+                            f"🔁 <b>Articol WP regenerat!</b>\n\n"
+                            f"<b>Titlu nou:</b> {pending_articol['titlu_wp']}\n\n"
+                            f"Datele liturgice au fost păstrate.",
+                            reply_markup=_get_inline_keyboard_main()
+                        )
+                    except Exception as e:
+                        tg_send(f"❌ Eroare regenerare WP: {str(e)}")
+                threading.Thread(target=_regen_wp_bg, daemon=True).start()
+
+            # ── Regenerează text Facebook ────────────────────────────
+            elif cb_data == 'regen_fb':
+                tg_answer_callback(cb_id, 'Regenerez textul FB...')
+                def _regen_fb_bg():
+                    global pending_articol
+                    art = pending_articol
+                    zi = art.get('zi_data', {})
+                    if not zi:
+                        tg_send("Nu există date liturgice.")
+                        return
+                    autor_f, citat_f = get_citat_familie()
+                    wp_link = art.get('wp_link', '')
+                    fb_text_nou = build_facebook_post(zi, wp_link)
+                    if fb_text_nou:
+                        pending_articol['fb_text'] = fb_text_nou + f'\n\n✦ {autor_f}:\n„{citat_f}"'
+                        _save_pending(pending_articol)
+                        tg_send(
+                            f"🔁 <b>Text Facebook regenerat:</b>\n\n{pending_articol['fb_text'][:600]}...",
+                            reply_markup=_get_inline_keyboard_main()
+                        )
+                threading.Thread(target=_regen_fb_bg, daemon=True).start()
+
+            # ── Verifică linkuri ─────────────────────────────────────
+            elif cb_data == 'verifica_linkuri':
+                tg_answer_callback(cb_id, 'Verific linkuri...')
+                def _verifica_linkuri_bg():
+                    art = pending_articol
+                    zi = art.get('zi_data', {})
+                    lines = ["🔎 <b>Verificare linkuri:</b>\n"]
+                    dox_url = zi.get('sources', {}).get('doxologia', '')
+                    if dox_url:
+                        ok_l, _ = _verify_image_url(dox_url)
+                        lines.append(f"{'✅' if ok_l else '❌'} Doxologia: <a href='{dox_url}'>{dox_url[:55]}</a>")
+                    v_url = zi.get('selected_verse', {}).get('source_url', '')
+                    v_ok = zi.get('selected_verse', {}).get('verified', False)
+                    if v_url:
+                        lines.append(f"{'✅' if v_ok else '⚠️'} Biblia Ortodoxă: <a href='{v_url}'>{v_url[:55]}</a>")
+                    else:
+                        lines.append("⚠️ Biblia Ortodoxă: fără link verset")
+                    ap_ref = zi.get('apostle', {}).get('reference', '')
+                    ev_ref = zi.get('gospel', {}).get('reference', '')
+                    lines.append(f"{'✅' if ap_ref else '⚠️'} Apostolul: {ap_ref or 'lipsește'}")
+                    lines.append(f"{'✅' if ev_ref else '⚠️'} Evanghelia: {ev_ref or 'lipsește'}")
+                    wp_link = art.get('wp_link', '')
+                    if wp_link:
+                        ok_l, _ = _verify_image_url(wp_link)
+                        lines.append(f"{'✅' if ok_l else '❌'} Articol WP: <a href='{wp_link}'>{wp_link[:55]}</a>")
+                    else:
+                        lines.append("⚠️ Articol WP: nepublicat încă")
+                    tg_send('\n'.join(lines))
+                threading.Thread(target=_verifica_linkuri_bg, daemon=True).start()
+
+            # ── Șterge draft ─────────────────────────────────────────
+            elif cb_data == 'sterge_draft':
+                art = pending_articol
+                post_id = art.get('wp_post_id') if art else None
+                if not post_id:
+                    tg_answer_callback(cb_id, 'Nu există draft.')
+                else:
+                    tg_answer_callback(cb_id, 'Șterg draftul...')
+                    def _sterge_draft_bg():
+                        global pending_articol
+                        try:
+                            requests.delete(
+                                f"{WP_URL}/wp-json/wp/v2/posts/{post_id}?force=true",
+                                headers=wp_auth(), timeout=15
+                            )
+                        except: pass
+                        pending_articol.pop('wp_post_id', None)
+                        pending_articol.pop('wp_link', None)
+                        _save_pending(pending_articol)
+                        tg_send("🗑️ Draft WordPress șters.", reply_markup=_get_inline_keyboard_main())
+                    threading.Thread(target=_sterge_draft_bg, daemon=True).start()
+
+            # ── Respinge ─────────────────────────────────────────────
+            elif cb_data == 'respinge_btn':
+                tg_answer_callback(cb_id, 'Respins.')
+                art_date = pending_articol.get('data_generare', datetime.datetime.now().strftime('%Y-%m-%d')) if pending_articol else ''
+                if art_date:
+                    _update_istoric_status(art_date, 'respins')
+                pending_articol = {}
+                _clear_pending()
+                tg_send("❌ Articolul a fost respins.")
+
+            # ── Editează WP (din buton) ──────────────────────────────
+            elif cb_data == 'editeaza_wp_btn':
+                if not pending_articol:
+                    tg_answer_callback(cb_id, 'Nu există articol.')
+                else:
+                    tg_answer_callback(cb_id, '')
+                    edit_mode = 'wp'
+                    continut_text = re.sub(r'<[^>]+>', '', pending_articol.get('continut_wp', ''))
+                    continut_text = re.sub(r'\s+', ' ', continut_text).strip()
+                    tg_send(
+                        f"<b>Titlu curent:</b> {pending_articol.get('titlu_wp','')}\n\n"
+                        f"<b>Conținut curent (fără HTML):</b>\n{continut_text[:600]}...\n\n"
+                        f"Trimite acum:\n<code>TITLU: titlul nou\nCONTINUT: textul nou</code>\n\n"
+                        f"Sau doar <code>TITLU: titlul nou</code> pentru a schimba doar titlul."
+                    )
+
         return jsonify({'ok': True})
 
     msg     = update.get('message', {})
@@ -2259,19 +2638,45 @@ def webhook():
     elif text in ['/start', '/help']:
         tg_send(
             "<b>Bot Parohia Cetate 2 Sibiu</b>\n\n"
-            "<b>Comenzi:</b>\n"
-            "/genereaza - articolul zilei\n"
-            "/aproba - publica pe WP + Facebook\n"
-            "/aproba_fb - publica doar pe Facebook\n"
-            "/aproba_wp - publica doar pe WordPress\n"
-            "/adaug [text] - adauga gand personal\n"
-            "/regenereaza - alt articol\n"
-            "/respinge - nu publica azi\n"
-            "/test_fb - verifică permisiunile token-ului Facebook\n\n"
+            "<b>Generare articol:</b>\n"
+            "/genereaza — articolul zilei (AI)\n"
+            "/scrie — articol cu cuvintele tale (fără AI)\n"
+            "  → trimite text, mesaj vocal sau fotografie\n\n"
+            "<b>Publicare (comenzi):</b>\n"
+            "/aproba — WP + Facebook\n"
+            "/aproba_fb — doar Facebook\n"
+            "/aproba_wp — doar WordPress\n\n"
+            "<b>Editare / Regenerare:</b>\n"
+            "/adaug [text] — adaugă gând personal\n"
+            "/regenereaza — alt articol complet\n"
+            "/regenereaza_cuvant — noi variante cuvânt de folos\n"
+            "/editeaza_fb — editează textul Facebook\n"
+            "/editeaza_wp — editează titlul/conținutul WP\n"
+            "/respinge — nu publica azi\n\n"
+            "<b>Diagnostice:</b>\n"
+            "/test_fb — verifică token Facebook\n\n"
+            "<b>Butoane inline:</b>\n"
+            "🌐 Draft WP → 🚀 Publică draftul\n"
+            "✅ Publică FB → include link articol WP\n"
+            "🔎 Verifică linkuri → status sfinți/Apostol/Ev\n\n"
             "<b>Trimiteti direct:</b>\n"
-            "Fotografie - articol foto\n"
-            "Mesaj vocal/audio - articol audio\n"
-            "Text liber - articol din textul tau"
+            "📷 Fotografie — articol foto (AI)\n"
+            "🎤 Mesaj vocal — articol audio (AI)\n"
+            "💬 Text liber — articol din text (AI)"
+        )
+
+    elif text == '/scrie':
+        edit_mode = 'scrie'
+        tg_send(
+            "✍️ <b>Mod scriere manuală</b>\n\n"
+            "Textul tău va fi publicat <b>fără modificări AI</b>.\n"
+            "Datele liturgice (sfinți, Apostol, Evanghelie) se adaugă automat din calendar.\n\n"
+            "Trimite acum:\n"
+            "<code>TITLU: Titlul articolului\n"
+            "CONTINUT: Textul complet...</code>\n\n"
+            "Sau trimite direct textul (titlul se generează automat).\n\n"
+            "Poți de asemenea trimite un <b>mesaj vocal</b> (transcris automat cu Whisper) "
+            "sau o <b>fotografie</b> cu legendă."
         )
 
     elif text == '/genereaza':
@@ -2287,8 +2692,45 @@ def webhook():
         tg_send(f"Anul omagial: {get_an_omagial()}")
 
     elif photo:
+        # Mod scriere manuala cu poza
+        if edit_mode == 'scrie':
+            edit_mode = None
+            tg_send("📷 Am primit fotografia. Pregătesc articolul manual... (10-20 sec)")
+            def _proc_scrie_photo():
+                global pending_articol
+                try:
+                    fb = tg_get_file(photo[-1]['file_id'])
+                    if not fb:
+                        tg_send("Nu am putut descărca fotografia.")
+                        return
+                    dt = get_azi()
+                    zi_data = fetch_doxologia_calendar(dt)
+                    sfinti = zi_data.get('saints', [])
+                    apostol = zi_data['apostle']['reference'] or zi_data['apostle']['text']
+                    evanghelie = zi_data['gospel']['reference'] or zi_data['gospel']['text']
+                    titlu = f"Moment de parohie — {get_zi_romana(dt)}"
+                    corp = caption if caption else "Imaginea de astăzi de la parohia noastră."
+                    paragraphs = [p.strip() for p in corp.split('\n') if p.strip()]
+                    continut_html = ''.join(f'<p>{p}</p>' for p in paragraphs)
+                    continut_wp = _bloc_sfinti(sfinti) + _bloc_lecturi(apostol, evanghelie) + continut_html + get_bloc_familie()
+                    fb_text = corp[:400] + '\n\n#ParohiaCetate2 #CalendarOrtodox'
+                    data = {
+                        'titlu_wp': titlu,
+                        'continut_wp': continut_wp,
+                        'fb_text': fb_text,
+                        'img_bytes': fb,
+                        'sfinti_list': _saint_names(sfinti),
+                        'categorii': [CAT_POSTARI_NOI, CAT_TRAIESTE],
+                        'publica_wp': True,
+                        'zi_data': zi_data,
+                        'data_generare': dt.strftime('%Y-%m-%d'),
+                    }
+                    trimite_spre_aprobare(data)
+                except Exception as e:
+                    tg_send(f"Eroare scriere foto: {str(e)}")
+            threading.Thread(target=_proc_scrie_photo, daemon=True).start()
         # Daca exista articol in asteptare, actualizeaza doar poza
-        if pending_articol:
+        elif pending_articol:
             def schimba_poza():
                 try:
                     fb = tg_get_file(photo[-1]['file_id'])
@@ -2320,24 +2762,55 @@ def webhook():
 
     elif audio:
         tg_send("Am primit mesajul audio. Transcriu cu Whisper... (30-60 sec)")
+        _scrie_audio = (edit_mode == 'scrie')
+        if edit_mode == 'scrie':
+            edit_mode = None
         def proc_audio():
+            global pending_articol
             try:
                 ab = tg_get_file(audio.get('file_id'))
                 if not ab:
                     tg_send("Nu am putut descarca audio.")
                     return
-                # Transcriere reala cu Groq Whisper
                 mime = audio.get('mime_type', 'audio/ogg')
                 transcriptie = transcrie_audio_groq(ab, mime)
                 if transcriptie:
-                    tg_send(f"Transcriptie: {transcriptie[:300]}")
+                    tg_send(f"Transcriptie Whisper:\n{transcriptie[:400]}")
                 else:
                     transcriptie = caption or "Mesaj duhovnicesc de la preotul parohiei"
-                data = _gen_din_audio(transcriptie, caption)
-                data['audio_bytes'] = ab
-                data['categorii'] = [CAT_POSTARI_NOI, CAT_TRAIESTE]
-                data['publica_wp'] = True
-                trimite_spre_aprobare(data)
+                if _scrie_audio:
+                    # Mod manual: transcriere directa fara AI
+                    dt = get_azi()
+                    zi_data = fetch_doxologia_calendar(dt)
+                    sfinti = zi_data.get('saints', [])
+                    apostol = zi_data['apostle']['reference'] or zi_data['apostle']['text']
+                    evanghelie = zi_data['gospel']['reference'] or zi_data['gospel']['text']
+                    titlu_m = re.search(r'TITLU:\s*(.+?)(?:\n|$)', transcriptie, re.IGNORECASE)
+                    titlu = titlu_m.group(1).strip() if titlu_m else f"Cuvânt de folos — {get_zi_romana(dt)}"
+                    corp = re.sub(r'TITLU:\s*.+?(\n|$)', '', transcriptie, flags=re.IGNORECASE).strip()
+                    paragraphs = [p.strip() for p in corp.split('\n') if p.strip()]
+                    continut_html = ''.join(f'<p>{p}</p>' for p in paragraphs)
+                    continut_wp = _bloc_sfinti(sfinti) + _bloc_lecturi(apostol, evanghelie) + continut_html + get_bloc_familie()
+                    fb_text = corp[:400] + '\n\n#ParohiaCetate2 #CalendarOrtodox'
+                    data = {
+                        'titlu_wp': titlu,
+                        'continut_wp': continut_wp,
+                        'fb_text': fb_text,
+                        'audio_bytes': ab,
+                        'sfinti_list': _saint_names(sfinti),
+                        'categorii': [CAT_POSTARI_NOI, CAT_TRAIESTE],
+                        'publica_wp': True,
+                        'zi_data': zi_data,
+                        'data_generare': dt.strftime('%Y-%m-%d'),
+                    }
+                    trimite_spre_aprobare(data)
+                else:
+                    # Mod normal: genereaza cu AI
+                    data = _gen_din_audio(transcriptie, caption)
+                    data['audio_bytes'] = ab
+                    data['categorii'] = [CAT_POSTARI_NOI, CAT_TRAIESTE]
+                    data['publica_wp'] = True
+                    trimite_spre_aprobare(data)
             except Exception as e:
                 tg_send(f"Eroare audio: {str(e)}")
         threading.Thread(target=proc_audio).start()
@@ -2356,7 +2829,45 @@ def webhook():
                 paragraphs = continut_nou.group(1).strip().split('\n')
                 pending_articol['continut_wp'] = ''.join(f'<p>{p.strip()}</p>' for p in paragraphs if p.strip())
             edit_mode = None
-            tg_send("✓ Articol WordPress actualizat!\n\n/aproba - publica acum\n/respinge - nu publica azi")
+            tg_send("✓ Articol WordPress actualizat!", reply_markup=_get_inline_keyboard_main())
+        elif edit_mode == 'scrie':
+            edit_mode = None
+            tg_send("✍️ Am primit textul. Pregătesc articolul manual... (10-20 sec)")
+            manual_text = text
+            def _proc_scrie_text():
+                global pending_articol
+                try:
+                    dt = get_azi()
+                    zi_data = fetch_doxologia_calendar(dt)
+                    sfinti = zi_data.get('saints', [])
+                    apostol = zi_data['apostle']['reference'] or zi_data['apostle']['text']
+                    evanghelie = zi_data['gospel']['reference'] or zi_data['gospel']['text']
+                    titlu_m = re.search(r'TITLU:\s*(.+?)(?:\n|$)', manual_text, re.IGNORECASE)
+                    continut_m = re.search(r'CONTINUT:\s*([\s\S]+)', manual_text, re.IGNORECASE)
+                    if titlu_m:
+                        titlu = titlu_m.group(1).strip()
+                        corp = continut_m.group(1).strip() if continut_m else manual_text
+                    else:
+                        titlu = f"Cuvânt de folos — {get_zi_romana(dt)}"
+                        corp = manual_text
+                    paragraphs = [p.strip() for p in corp.split('\n') if p.strip()]
+                    continut_html = ''.join(f'<p>{p}</p>' for p in paragraphs)
+                    continut_wp = _bloc_sfinti(sfinti) + _bloc_lecturi(apostol, evanghelie) + continut_html + get_bloc_familie()
+                    fb_text = corp[:400] + '\n\n#ParohiaCetate2 #CalendarOrtodox'
+                    data = {
+                        'titlu_wp': titlu,
+                        'continut_wp': continut_wp,
+                        'fb_text': fb_text,
+                        'sfinti_list': _saint_names(sfinti),
+                        'categorii': [CAT_TRAIESTE, CAT_POSTARI_NOI],
+                        'publica_wp': True,
+                        'zi_data': zi_data,
+                        'data_generare': dt.strftime('%Y-%m-%d'),
+                    }
+                    trimite_spre_aprobare(data)
+                except Exception as e:
+                    tg_send(f"Eroare scriere: {str(e)}")
+            threading.Thread(target=_proc_scrie_text, daemon=True).start()
         else:
             tg_send("Am primit mesajul. Generez... (20-30 sec)")
             def proc_text():
@@ -2537,6 +3048,19 @@ def ep_test():
     verse_link = (f'<a href="{verse_url}" target="_blank" style="color:#8B0000;">'
                   f'{verse_ref}</a>') if verse_url else verse_ref
 
+    # 4. WordPress API
+    wp_status = test_wordpress()
+    wp_rows = (
+        row('URL WordPress', WP_URL, bool(WP_URL))
+        + row('Utilizator WP', WP_USER, bool(WP_USER))
+        + row('Conexiune API', 'DA' if wp_status['connection'] else f'NU — {wp_status["error"]}', wp_status['connection'])
+        + row('Autentificare', 'DA' if wp_status['auth'] else 'NU (verifică WP_PASS)', wp_status['auth'])
+        + row('Utilizator detectat', wp_status['user'] or '—', bool(wp_status['user']))
+        + row('Poate crea draft', 'DA' if wp_status['can_draft'] else 'NU', wp_status['can_draft'])
+        + (row('Draft activ (post_id)', str(_load_pending().get('wp_post_id', '')), bool(_load_pending().get('wp_post_id'))))
+        + (row('Link draft/articol WP', _load_pending().get('wp_link', ''), bool(_load_pending().get('wp_link'))))
+    )
+
     # Debug Biblia Ortodoxa
     dbg = verse.get('debug', {})
     dbg_rows = ''
@@ -2638,7 +3162,15 @@ def ep_test():
 {warnings_html}
 
 <h3 style="color:#8B0000;font-size:14px;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px;">
-  4. Scheduler &amp; Keepalive
+  4. WordPress API
+</h3>
+<table style="width:100%;border-collapse:collapse;background:#fff;border-radius:8px;
+  box-shadow:0 1px 6px rgba(0,0,0,.07);margin-bottom:20px;overflow:hidden;">
+  {wp_rows}
+</table>
+
+<h3 style="color:#8B0000;font-size:14px;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px;">
+  5. Scheduler &amp; Keepalive
 </h3>
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:8px;
   box-shadow:0 1px 6px rgba(0,0,0,.07);margin-bottom:20px;overflow:hidden;">
