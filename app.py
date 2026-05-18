@@ -344,23 +344,26 @@ def get_imagine_doxologia(query=''):
     return get_imagine_fallback(query)
 
 def get_imagine_fallback(query=''):
-    """Imagini de rezerva verificate"""
+    # Imagini verificate de pe Wikimedia Commons - stabile permanent
     imagini = {
-        'craciun':   'https://basilica.ro/wp-content/uploads/2023/12/nasterea-domnului.jpg',
-        'paste':     'https://basilica.ro/wp-content/uploads/2024/04/invierea-domnului.jpg',
-        'florii':    'https://basilica.ro/wp-content/uploads/2024/04/duminica-floriilor.jpg',
-        'boboteaza': 'https://basilica.ro/wp-content/uploads/2024/01/botezul-domnului.jpg',
-        'post':      'https://basilica.ro/wp-content/uploads/2023/03/postul-mare.jpg',
-        'maica':     'https://basilica.ro/wp-content/uploads/2023/08/adormirea-maicii-domnului.jpg',
-        'cruce':     'https://basilica.ro/wp-content/uploads/2023/09/inaltarea-sfintei-cruci.jpg',
-        'nicolae':   'https://basilica.ro/wp-content/uploads/2023/12/sfantul-nicolae.jpg',
-        'andrei':    'https://basilica.ro/wp-content/uploads/2023/11/sf-apostol-andrei.jpg',
-        'vasile':    'https://basilica.ro/wp-content/uploads/2024/01/sf-vasile-cel-mare.jpg',
-        'botez':     'https://basilica.ro/wp-content/uploads/2024/01/botezul-domnului.jpg',
-        'default':   'https://basilica.ro/wp-content/uploads/2023/10/biserica-ortodoxa.jpg',
+        'craciun':   'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8c/Nativity_icon_Sinai_12th_century.jpg/800px-Nativity_icon_Sinai_12th_century.jpg',
+        'paste':     'https://upload.wikimedia.org/wikipedia/commons/thumb/0/06/Anastasis_mosaic%2C_Chora_church%2C_Constantinople%2C_14th_century.jpg/800px-Anastasis_mosaic%2C_Chora_church%2C_Constantinople%2C_14th_century.jpg',
+        'florii':    'https://upload.wikimedia.org/wikipedia/commons/thumb/d/d3/Entry_into_Jerusalem_icon.jpg/800px-Entry_into_Jerusalem_icon.jpg',
+        'boboteaza': 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6f/Baptism_of_Christ%2C_mosaic%2C_Baptistry_of_Neon%2C_Ravenna_%285th_century%29.jpg/800px-Baptism_of_Christ%2C_mosaic%2C_Baptistry_of_Neon%2C_Ravenna_%285th_century%29.jpg',
+        'post':      'https://upload.wikimedia.org/wikipedia/commons/thumb/5/5b/Christ_in_the_Wilderness_-_Ivan_Kramskoy_-_1872.jpg/800px-Christ_in_the_Wilderness_-_Ivan_Kramskoy_-_1872.jpg',
+        'maica':     'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1b/Theotokos_of_Vladimir.jpg/600px-Theotokos_of_Vladimir.jpg',
+        'cruce':     'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0d/The_Crucifixion_icon%2C_Novgorod_school%2C_late_15c.jpg/600px-The_Crucifixion_icon%2C_Novgorod_school%2C_late_15c.jpg',
+        'nicolae':   'https://upload.wikimedia.org/wikipedia/commons/thumb/2/2f/Nicholas_of_Myra_icon.jpg/600px-Nicholas_of_Myra_icon.jpg',
+        'andrei':    'https://upload.wikimedia.org/wikipedia/commons/thumb/4/4f/Saint_Andrew_the_Apostle_%28icon%29.jpg/600px-Saint_Andrew_the_Apostle_%28icon%29.jpg',
+        'vasile':    'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Saint_Basil_icon.jpg/600px-Saint_Basil_icon.jpg',
+        'botez':     'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6f/Baptism_of_Christ%2C_mosaic%2C_Baptistry_of_Neon%2C_Ravenna_%285th_century%29.jpg/800px-Baptism_of_Christ%2C_mosaic%2C_Baptistry_of_Neon%2C_Ravenna_%285th_century%29.jpg',
+        'schimbare': 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c8/Transfiguration_icon.jpg/600px-Transfiguration_icon.jpg',
+        'inaltare':  'https://upload.wikimedia.org/wikipedia/commons/thumb/5/5d/Ascension_of_Jesus_Christ_icon.jpg/600px-Ascension_of_Jesus_Christ_icon.jpg',
+        'duminica':  'https://upload.wikimedia.org/wikipedia/commons/thumb/d/d9/Christ_Pantocrator_mosaic_from_Hagia_Sophia.jpg/600px-Christ_Pantocrator_mosaic_from_Hagia_Sophia.jpg',
+        'default':   'https://upload.wikimedia.org/wikipedia/commons/thumb/9/95/Mitropolia_Ardealului_Sibiu.jpg/800px-Mitropolia_Ardealului_Sibiu.jpg',
     }
     q = query.lower()
-    for k,v in imagini.items():
+    for k, v in imagini.items():
         if k in q:
             return v
     return imagini['default']
@@ -706,11 +709,19 @@ def _bloc_sfinti(sfinti_list):
     if not sfinti_list:
         return ''
     sfinti_str = ', '.join(sfinti_list)
+    zi_str = get_zi_romana()
     return (
-        f'<div style="background:#fffdf5;border-left:3px solid #c9a227;padding:12px 20px;margin:16px 0;border-radius:0 6px 6px 0;">'
-        f'<p style="margin:0 0 4px 0;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#c9a227;font-weight:bold;">'
-        f'<a href="https://doxologia.ro/calendar-ortodox" target="_blank" style="color:#c9a227;text-decoration:none;">Sfintii zilei ↗</a></p>'
-        f'<p style="margin:0;color:#333;line-height:1.8;font-style:italic;">{sfinti_str}</p>'
+        f'<div style="background:linear-gradient(135deg,#fffdf0,#fffbea);border:1px solid #e8d5a0;'
+        f'border-left:5px solid #c9a227;padding:20px 24px;margin:0 0 24px 0;border-radius:0 8px 8px 0;'
+        f'box-shadow:0 2px 8px rgba(201,162,39,0.1);">'
+        f'<p style="margin:0 0 4px 0;font-size:11px;text-transform:uppercase;letter-spacing:2px;'
+        f'color:#c9a227;font-weight:700;font-family:Georgia,serif;">{zi_str}</p>'
+        f'<p style="margin:0 0 6px 0;font-size:13px;text-transform:uppercase;letter-spacing:1px;'
+        f'color:#8B6914;font-weight:600;">'
+        f'<a href="https://doxologia.ro/calendar-ortodox" target="_blank" '
+        f'style="color:#8B6914;text-decoration:none;">✦ Sfinții zilei ↗</a></p>'
+        f'<p style="margin:0;color:#4a3300;line-height:1.9;font-style:italic;font-size:15px;'
+        f'font-family:Georgia,serif;">{sfinti_str}</p>'
         f'</div>'
     )
 
@@ -718,18 +729,26 @@ def _bloc_lecturi(apostol, evanghelie):
     if not apostol and not evanghelie:
         return ''
     url_cal = 'https://doxologia.ro/calendar-ortodox'
-    bloc = '<div style="background:#fdf8f3;border-left:3px solid #8B0000;padding:16px 20px;margin:20px 0;border-radius:0 6px 6px 0;">'
+    bloc = (
+        f'<div style="background:linear-gradient(135deg,#fdf5f5,#fdf8f8);border:1px solid #dcc0c0;'
+        f'border-left:5px solid #8B0000;padding:20px 24px;margin:0 0 24px 0;border-radius:0 8px 8px 0;'
+        f'box-shadow:0 2px 8px rgba(139,0,0,0.08);">'
+    )
     if apostol:
         bloc += (
-            f'<p style="margin:0 0 6px 0;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#8B0000;font-weight:bold;">'
-            f'<a href="{url_cal}" target="_blank" style="color:#8B0000;text-decoration:none;">Apostolul zilei ↗</a></p>'
-            f'<p style="margin:0 0 16px 0;font-style:italic;color:#333;line-height:1.8;">{apostol}</p>'
+            f'<p style="margin:0 0 4px 0;font-size:11px;text-transform:uppercase;letter-spacing:2px;'
+            f'color:#8B0000;font-weight:700;">'
+            f'<a href="{url_cal}" target="_blank" style="color:#8B0000;text-decoration:none;">✦ Apostolul zilei ↗</a></p>'
+            f'<p style="margin:0 0 18px 0;font-style:italic;color:#2c0000;line-height:1.9;font-size:15px;'
+            f'font-family:Georgia,serif;padding-left:12px;border-left:2px solid #c9a0a0;">{apostol}</p>'
         )
     if evanghelie:
         bloc += (
-            f'<p style="margin:0 0 6px 0;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#8B0000;font-weight:bold;">'
-            f'<a href="{url_cal}" target="_blank" style="color:#8B0000;text-decoration:none;">Evanghelia zilei ↗</a></p>'
-            f'<p style="margin:0;font-style:italic;color:#333;line-height:1.8;">{evanghelie}</p>'
+            f'<p style="margin:0 0 4px 0;font-size:11px;text-transform:uppercase;letter-spacing:2px;'
+            f'color:#8B0000;font-weight:700;">'
+            f'<a href="{url_cal}" target="_blank" style="color:#8B0000;text-decoration:none;">✦ Evanghelia zilei ↗</a></p>'
+            f'<p style="margin:0;font-style:italic;color:#2c0000;line-height:1.9;font-size:15px;'
+            f'font-family:Georgia,serif;padding-left:12px;border-left:2px solid #c9a0a0;">{evanghelie}</p>'
         )
     bloc += '</div>'
     return bloc
