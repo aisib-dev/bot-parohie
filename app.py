@@ -113,28 +113,31 @@ def _cauta_an_omagial(an):
 #  CITATE FAMILIE - ANUL OMAGIAL 2026
 # ============================================================
 CITATE_FAMILIE = [
-    ("Sf. Ioan Gură de Aur",
-     "Nu există nimic mai dulce decât a fi iubit de soție și a o iubi. Cel care iubește pe soția sa se iubește pe sine însuși."),
-    ("Sf. Ioan Gură de Aur",
-     "Familia este o Biserică mică. Când tatăl, mama și copiii sunt uniți în rugăciune, Hristos este în mijlocul lor."),
-    ("Patriarhul Daniel",
-     "Familia creștină este primul loc în care copilul Îl întâlnește pe Dumnezeu, prin rugăciunea părinților și prin dragostea care domnește în casă."),
-    ("Patriarhul Daniel",
-     "Familia este școala iubirii jertfelnice, locul în care învățăm să dăruim fără să așteptăm în schimb."),
-    ("Pr. Constantin Necula",
-     "O familie care se roagă împreună rămâne împreună. Nu există furtună care să doboare casa zidită pe rugăciune."),
-    ("Pr. Constantin Necula",
-     "Copiii nu au nevoie de părinți perfecți, ci de părinți care știu să ceară iertare și să iubească necondiționat."),
-    ("Sf. Vasile cel Mare",
-     "Casa în care se citesc rugăciunile dimineții și serii este o cetate întărită pe care diavolul nu o poate doborî."),
-    ("Sf. Siluan Athonitul",
-     "Cel care iubește familia sa cu adevărat iubește în ea chipul lui Dumnezeu. Iubind pe ai tăi, Îl iubești pe El."),
+    # Citate biblice - verificate
     ("Biblia — Efeseni 5, 25",
      "Bărbații, iubiți pe femeile voastre, după cum și Hristos a iubit Biserica și S-a dat pe Sine pentru ea."),
+    ("Biblia — Efeseni 5, 33",
+     "Fiecare dintre voi să-și iubească femeia ca pe sine însuși, iar femeia să se teamă de bărbat."),
     ("Biblia — Coloseni 3, 14",
      "Peste toate acestea, îmbrăcați-vă întru dragoste, care este legătura desăvârșirii."),
+    ("Biblia — Coloseni 3, 20-21",
+     "Copii, ascultați de părinți întru toate, căci aceasta este bine-plăcut Domnului. Părinților, nu întărâtați pe copiii voștri, ca să nu se deznădăjduiască."),
     ("Biblia — Psalmul 127, 3",
      "Fiii tăi ca niște vlăstare de măslin împrejurul mesei tale. Iată, așa se va binecuvânta omul cel ce se teme de Domnul."),
+    ("Biblia — Pilde 31, 10",
+     "Cine poate găsi o femeie vrednică? Ea prețuiește mai mult decât mărgăritarele."),
+    ("Biblia — Matei 19, 6",
+     "Ceea ce a împreunat Dumnezeu, omul să nu despartă."),
+    # Sf. Ioan Gură de Aur - Omilii la Efeseni (sursa verificabila)
+    ("Sf. Ioan Gură de Aur — Omilii la Efeseni",
+     "Fă din casa ta o Biserică. Primește pe Hristos, căci cel care primește un sărac Îl primește pe Hristos."),
+    ("Sf. Ioan Gură de Aur — Omilii la Efeseni",
+     "Nimic nu este mai puternic decât un bărbat și o femeie uniți în dragoste, când aceasta are Îl are pe Hristos în mijlocul ei."),
+    # ================================================================
+    # ADAUGA AICI citatele tale verificate (din carti, predici, interviuri):
+    # ("IPS Laurentiu Streza", "citatul exact..."),
+    # ("Pr. Constantin Necula", "citatul exact..."),
+    # ================================================================
 ]
 
 def get_citat_familie():
