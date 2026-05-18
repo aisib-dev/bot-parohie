@@ -23,6 +23,7 @@ TG_CHAT_ID    = os.environ.get('TG_CHAT_ID', '')
 
 client = OpenAI(api_key=GROQ_KEY, base_url="https://api.groq.com/openai/v1")
 pending_articol = {}
+edit_mode = None  # 'fb' sau 'wp'
 
 # ============================================================
 #  CATEGORII WORDPRESS
@@ -491,6 +492,8 @@ def trimite_spre_aprobare(articol):
         f"<b>Raspunde cu:</b>\n"
         f"/aproba - publica acum\n"
         f"/adaug [text] - adauga gand personal\n"
+        f"/editeaza_fb - editeaza textul Facebook\n"
+        f"/editeaza_wp - editeaza titlul si continutul WordPress\n"
         f"/regenereaza - genereaza alt articol\n"
         f"/respinge - nu publica azi"
     )
@@ -962,6 +965,33 @@ def webhook():
                 pass
         threading.Thread(target=_trigger_regen, daemon=True).start()
 
+    elif text == '/editeaza_fb':
+        global edit_mode
+        if not pending_articol:
+            tg_send("Nu exista articol in asteptare.")
+        else:
+            edit_mode = 'fb'
+            tg_send(
+                f"<b>Text Facebook curent:</b>\n\n"
+                f"{pending_articol.get('fb_text','')}\n\n"
+                f"Trimite acum textul nou pentru Facebook."
+            )
+
+    elif text == '/editeaza_wp':
+        global edit_mode
+        if not pending_articol:
+            tg_send("Nu exista articol in asteptare.")
+        else:
+            edit_mode = 'wp'
+            continut_text = re.sub(r'<[^>]+>', '', pending_articol.get('continut_wp', ''))
+            continut_text = re.sub(r'\s+', ' ', continut_text).strip()
+            tg_send(
+                f"<b>Titlu curent:</b> {pending_articol.get('titlu_wp','')}\n\n"
+                f"<b>Continut curent (fara HTML):</b>\n{continut_text[:800]}...\n\n"
+                f"Trimite acum:\n<code>TITLU: titlul nou\nCONTINUT: textul nou</code>\n\n"
+                f"Sau doar <code>TITLU: titlul nou</code> pentru a schimba doar titlul."
+            )
+
     elif text == '/respinge':
         pending_articol = {}
         tg_send("Articolul a fost respins.")
@@ -1029,16 +1059,32 @@ def webhook():
         threading.Thread(target=proc_audio).start()
 
     elif text and not text.startswith('/'):
-        tg_send("Am primit mesajul. Generez... (20-30 sec)")
-        def proc_text():
-            try:
-                data = _gen_din_text(text)
-                data['categorii'] = [CAT_POSTARI_NOI, CAT_TRAIESTE]
-                data['publica_wp'] = True
-                trimite_spre_aprobare(data)
-            except Exception as e:
-                tg_send(f"Eroare: {str(e)}")
-        threading.Thread(target=proc_text).start()
+        global edit_mode
+        if edit_mode == 'fb' and pending_articol:
+            pending_articol['fb_text'] = text
+            edit_mode = None
+            tg_send("✓ Text Facebook actualizat!\n\n/aproba - publica acum\n/respinge - nu publica azi")
+        elif edit_mode == 'wp' and pending_articol:
+            titlu_nou = re.search(r'TITLU:\s*(.+?)(?:\n|$)', text, re.IGNORECASE)
+            continut_nou = re.search(r'CONTINUT:\s*([\s\S]+)', text, re.IGNORECASE)
+            if titlu_nou:
+                pending_articol['titlu_wp'] = titlu_nou.group(1).strip()
+            if continut_nou:
+                paragraphs = continut_nou.group(1).strip().split('\n')
+                pending_articol['continut_wp'] = ''.join(f'<p>{p.strip()}</p>' for p in paragraphs if p.strip())
+            edit_mode = None
+            tg_send("✓ Articol WordPress actualizat!\n\n/aproba - publica acum\n/respinge - nu publica azi")
+        else:
+            tg_send("Am primit mesajul. Generez... (20-30 sec)")
+            def proc_text():
+                try:
+                    data = _gen_din_text(text)
+                    data['categorii'] = [CAT_POSTARI_NOI, CAT_TRAIESTE]
+                    data['publica_wp'] = True
+                    trimite_spre_aprobare(data)
+                except Exception as e:
+                    tg_send(f"Eroare: {str(e)}")
+            threading.Thread(target=proc_text).start()
 
     return jsonify({'ok': True})
 
