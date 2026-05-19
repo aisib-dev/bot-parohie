@@ -575,6 +575,33 @@ def _parse_calendar_zi_section(section):
             saints.append(txt)
     return list(dict.fromkeys(saints)), ap_ref, ev_ref
 
+def fetch_doxologia_reading(path):
+    """Preia textul integral al pericopei (apostol sau evanghelie) de pe doxologia.ro."""
+    try:
+        url = 'https://doxologia.ro' + path
+        h = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        r = requests.get(url, headers=h, timeout=12)
+        if r.status_code != 200:
+            return ''
+        html = r.text
+        for pattern in [
+            r'<div[^>]+class="[^"]*field-item\s+even[^"]*"[^>]*>([\s\S]{80,5000}?)</div>',
+            r'<div[^>]+class="[^"]*field-items[^"]*"[^>]*>([\s\S]{80,5000}?)</div>',
+            r'<div[^>]+class="[^"]*node-content[^"]*"[^>]*>([\s\S]{80,5000}?)</div>',
+            r'<div[^>]+class="[^"]*body[^"]*"[^>]*>([\s\S]{80,5000}?)</div>',
+            r'<article[^>]*>([\s\S]{80,5000}?)</article>',
+        ]:
+            m = re.search(pattern, html, re.IGNORECASE)
+            if m:
+                content = re.sub(r'<[^>]+>', ' ', m.group(1))
+                content = re.sub(r'\s+', ' ', content).strip()
+                if len(content) > 80:
+                    return content[:2500]
+        return ''
+    except Exception:
+        return ''
+
+
 def fetch_doxologia_calendar(dt):
     """Preia calendarul ortodox de pe doxologia.ro pentru data specificata.
     Foloseste URL-ul specific zilei (ex: /19-mai).
@@ -599,30 +626,56 @@ def fetch_doxologia_calendar(dt):
         saints, ap_ref, ev_ref = [], '', ''
 
         # ── Strategia 1 (PRIMARA): href pattern ──────────────────────────────
-        # Apostol: <a href="/apostol/ap-...">Ap. Fapte 17, 19-28</a>
+        # Apostol: href /apostol/ap-... apare de 3 ori; prefer textul cu prefix "Ap."
+        ap_href = ''
+        _ap_candidates = []
         for m in re.finditer(r'<a[^>]+href="(/apostol/ap-[^"]+)"[^>]*>\s*([^<]{3,80}?)\s*</a>', html):
-            txt = m.group(2).strip()
-            if txt and not ap_ref:
-                ap_ref = txt
-                debug.append(f"Apostol din href /apostol/: {txt}")
+            href, txt = m.group(1), m.group(2).strip()
+            if txt:
+                _ap_candidates.append((href, txt))
+        for href, c in _ap_candidates:
+            if c.lower().startswith('ap.') or c.lower().startswith('ap '):
+                ap_ref = c
+                ap_href = href
+                break
+        if not ap_ref and _ap_candidates:
+            ap_ref = _ap_candidates[-1][1]
+            ap_href = _ap_candidates[-1][0]
+        if ap_ref:
+            debug.append(f"Apostol din href /apostol/ap-: {ap_ref}")
 
-        # Evanghelie: <a href="/ev-...">Ev. Ioan 12, 19-36</a>
+        # Evanghelie: href /ev-... — prefer textul cu prefix "Ev."
+        ev_href = ''
+        _ev_candidates = []
         for m in re.finditer(r'<a[^>]+href="(/ev-[^"]+)"[^>]*>\s*([^<]{3,80}?)\s*</a>', html):
-            txt = m.group(2).strip()
-            if txt and not ev_ref:
-                ev_ref = txt
-                debug.append(f"Evanghelie din href /ev-: {txt}")
+            href, txt = m.group(1), m.group(2).strip()
+            if txt:
+                _ev_candidates.append((href, txt))
+        for href, c in _ev_candidates:
+            if c.lower().startswith('ev.') or c.lower().startswith('ev '):
+                ev_ref = c
+                ev_href = href
+                break
+        if not ev_ref and _ev_candidates:
+            ev_ref = _ev_candidates[-1][1]
+            ev_href = _ev_candidates[-1][0]
+        if ev_ref:
+            debug.append(f"Evanghelie din href /ev-: {ev_ref}")
 
-        # Sfinti: <a href="/sfant...">Sfântul/Sfânta/Cuvios ...</a>
+        # Sfinti: slug fara sub-cale (fara / dupa slug) + text trebuie sa inceapa cu prefix sfant
+        _SAINT_PREFIXES = ('sfânt', 'sfant', 'sfânta', 'sfanta', 'cuvios', 'cuvioasă',
+                           'cuvioasa', 'mucenic', 'sfințit', 'sfintit', 'ierarh', 'proroc', 'apostol ')
         seen_saints = set()
         for m in re.finditer(
-            r'<a[^>]+href="/(?:sfant[^"]*|cuvio[^"]*|mucenic[^"]*|ierarh[^"]*|proroc[^"]*|apostol-[^"]*)"[^>]*>\s*([^<]{4,150}?)\s*</a>',
+            r'<a[^>]+href="(/(?:sfant[^"/]*|cuvio[^"/]*|mucenic[^"/]*|ierarh[^"/]*|proroc[^"/]*|apostol-[^"/"]*))\"[^>]*>\s*([^<]{4,150}?)\s*</a>',
             html, re.IGNORECASE
         ):
-            txt = m.group(1).strip()
-            if txt and txt not in seen_saints and len(txt) > 4:
+            href, txt = m.group(1), m.group(2).strip()
+            tl = txt.lower()
+            if (txt and txt not in seen_saints and len(txt) > 4
+                    and any(tl.startswith(p) for p in _SAINT_PREFIXES)):
                 seen_saints.add(txt)
-                saints.append(txt)
+                saints.append({'name': txt, 'url': 'https://doxologia.ro' + href})
         if saints:
             debug.append(f"Sfinti din href pattern: {len(saints)}")
 
@@ -640,11 +693,11 @@ def fetch_doxologia_calendar(dt):
 
         # Sfinti din text pattern daca href n-a gasit nimic
         if not saints:
-            for m in re.finditer(r'<a[^>]*>\s*((?:Sf[âa]nt[^<]{2,}|Cuvio[^<]{2,}|Mucenic[^<]{2,}|Ierarh[^<]{2,}|Proroc[^<]{2,}))\s*</a>', html, re.IGNORECASE):
-                txt = m.group(1).strip()
+            for m in re.finditer(r'<a[^>]*href="(/[^"]*)"[^>]*>\s*((?:Sf[âa]nt[^<]{2,}|Cuvio[^<]{2,}|Mucenic[^<]{2,}|Ierarh[^<]{2,}|Proroc[^<]{2,}))\s*</a>', html, re.IGNORECASE):
+                href, txt = m.group(1), m.group(2).strip()
                 if txt and txt not in seen_saints and len(txt) > 4:
                     seen_saints.add(txt)
-                    saints.append(txt)
+                    saints.append({'name': txt, 'url': 'https://doxologia.ro' + href})
             if saints:
                 debug.append(f"Sfinti din text pattern: {len(saints)}")
 
@@ -685,11 +738,33 @@ def fetch_doxologia_calendar(dt):
                         saints = names
                         debug.append(f"Sfinti din meta: {len(saints)}")
 
+        # Preia textul integral al pericopelor de pe paginile doxologia.ro
+        ap_text = fetch_doxologia_reading(ap_href) if ap_href else ''
+        ev_text = fetch_doxologia_reading(ev_href) if ev_href else ''
+        if ap_text:
+            debug.append(f"Text apostol preluat: {len(ap_text)} caractere")
+        if ev_text:
+            debug.append(f"Text evanghelie preluat: {len(ev_text)} caractere")
+
         debug.append(f"FINAL: sfinti={len(saints)}, ap={bool(ap_ref)}, ev={bool(ev_ref)}")
 
-        zi_data['saints']  = list(dict.fromkeys(saints))  # deduplica
-        zi_data['apostle'] = {'reference': ap_ref, 'text': ''}
-        zi_data['gospel']  = {'reference': ev_ref, 'text': ''}
+        # Deduplicare sfinti (pot fi dicts sau strings)
+        seen_n = set()
+        deduped_saints = []
+        for s in saints:
+            nm = s['name'] if isinstance(s, dict) else s
+            if nm not in seen_n:
+                seen_n.add(nm)
+                deduped_saints.append(s)
+        zi_data['saints']  = deduped_saints
+        zi_data['apostle'] = {
+            'reference': ap_ref, 'text': ap_text,
+            'url': ('https://doxologia.ro' + ap_href) if ap_href else '',
+        }
+        zi_data['gospel']  = {
+            'reference': ev_ref, 'text': ev_text,
+            'url': ('https://doxologia.ro' + ev_href) if ev_href else '',
+        }
 
         if not saints:
             zi_data['warnings'].append('Sfintii zilei lipsesc')
@@ -1025,16 +1100,22 @@ def validate_liturgical_data(zi_data):
     }
 
 def _make_zi_context(zi_data):
-    saints_str = ', '.join(zi_data['saints']) if zi_data['saints'] else 'Sfintii zilei'
-    ap_ref = zi_data['apostle'].get('reference', '')
-    ev_ref = zi_data['gospel'].get('reference', '')
-    v_ref  = zi_data['selected_verse'].get('reference', '')
-    v_text = zi_data['selected_verse'].get('text', '')
+    saints_str = ', '.join(_saint_names(zi_data['saints'])) if zi_data['saints'] else 'Sfintii zilei'
+    ap_ref  = zi_data['apostle'].get('reference', '')
+    ap_text = zi_data['apostle'].get('text', '')
+    ev_ref  = zi_data['gospel'].get('reference', '')
+    ev_text = zi_data['gospel'].get('text', '')
+    v_ref   = zi_data['selected_verse'].get('reference', '')
+    v_text  = zi_data['selected_verse'].get('text', '')
     ctx = (
         f"Sfintii zilei: {saints_str}.\n"
         f"Apostolul: {ap_ref}.\n"
         f"Evanghelia: {ev_ref}.\n"
     )
+    if ap_text:
+        ctx += f'Text Apostol (pericopa): {ap_text[:450]}\n'
+    if ev_text:
+        ctx += f'Text Evanghelie (pericopa): {ev_text[:450]}\n'
     if v_text:
         ctx += f'Verset ales: {v_ref} — \"{v_text}\"\n'
     return ctx
@@ -1286,11 +1367,12 @@ def _get_inline_keyboard_main(lv=None):
                 {'text': '✏️ Editează WP', 'callback_data': 'editeaza_wp_btn'},
             ],
             [
+                {'text': '📝 Schimbă titlul', 'callback_data': 'edit_titlu'},
                 {'text': '🔁 Regen WP', 'callback_data': 'regen_wp'},
                 {'text': '🔁 Regen FB', 'callback_data': 'regen_fb'},
-                {'text': '🔎 Linkuri', 'callback_data': 'verifica_linkuri'},
             ],
             [
+                {'text': '🔎 Linkuri', 'callback_data': 'verifica_linkuri'},
                 {'text': '❌ Respinge', 'callback_data': 'respinge_btn'},
             ],
         ]
@@ -1908,52 +1990,63 @@ def genereaza_articol_zilnic(extra_text=''):
     ev_ref     = zi_data['gospel']['reference']
     apostol    = ap_ref or zi_data['apostle']['text']
     evanghelie = ev_ref or zi_data['gospel']['text']
+    ap_text    = zi_data['apostle'].get('text', '')
+    ev_text    = zi_data['gospel'].get('text', '')
+    ap_url     = zi_data['apostle'].get('url', '')
+    ev_url     = zi_data['gospel'].get('url', '')
 
     # Fallback DOAR daca lipseste una din lecturi (nu ambele)
     if not apostol or not evanghelie:
         pilda, solomon = scrape_pilde_solomon()
         apostol    = apostol or pilda
         evanghelie = evanghelie or solomon
+        ap_text = ev_text = ap_url = ev_url = ''
 
-    sfinti_str = ', '.join(sfinti) if sfinti else 'Sfintii zilei'
+    sfinti_str = ', '.join(_saint_names(sfinti)) if sfinti else 'Sfintii zilei'
     autor_f, citat_f = get_citat_familie()
     s_extra   = f'\nGandul preotului (integreaza natural, nu fortat): {extra_text}' if extra_text else ''
+    # Adauga textul pericopelor pentru AI sa genereze meditatie pe textul real
+    if ap_text:
+        s_extra += f'\n\nTextul Apostolului zilei (foloseste-l direct in meditatie):\n{ap_text[:600]}'
+    if ev_text:
+        s_extra += f'\n\nTextul Evangheliei zilei (foloseste-l direct in meditatie):\n{ev_text[:600]}'
     s_spec    = f'\nZi speciala de marcat discret: {zi_spec}' if zi_spec else ''
     s_an      = f'\nAnul omagial: {an_om} - integreaza un gand scurt despre familie.'
     s_familie = f'\nCitat despre familie pentru fb_text (integreaza natural la final): {autor_f}: "{citat_f}"'
+    lecturi_ctx = {'ap_text': ap_text, 'ev_text': ev_text, 'ap_url': ap_url, 'ev_url': ev_url}
 
     try:
         if tip == 'saptamana_mare':
             titlu_zi, tema_zi = get_nume_saptamana_mare(dt)
-            data = _gen_saptamana_mare(zi, titlu_zi, tema_zi, apostol, evanghelie, s_extra)
+            data = _gen_saptamana_mare(zi, titlu_zi, tema_zi, apostol, evanghelie, s_extra, lecturi_ctx)
             data['categorii'] = [CAT_PREDICA]
             data['video_bloc'] = get_video_resurse_saptamana_mare(titlu_zi)
 
         elif tip == 'sarbatoare':
             nume = get_nume_sarbatoare(dt)
-            data = _gen_sarbatoare(zi, nume, apostol, evanghelie, s_extra, s_spec, s_an + s_familie)
+            data = _gen_sarbatoare(zi, nume, apostol, evanghelie, s_extra, s_spec, s_an + s_familie, lecturi_ctx)
             data['categorii'] = [CAT_PREDICA, CAT_POSTARI_NOI]
             data['imagine_query'] = nume.lower()
 
         elif tip == 'inceput_post':
             nume = get_nume_post(dt)
-            data = _gen_inceput_post(zi, nume, apostol, evanghelie, s_extra, s_an + s_familie)
+            data = _gen_inceput_post(zi, nume, apostol, evanghelie, s_extra, s_an + s_familie, lecturi_ctx)
             data['categorii'] = [CAT_TRAIESTE]
             data['imagine_query'] = 'post'
 
         elif tip == 'duminica':
             nr = dt.isocalendar()[1]
             data = _gen_duminica(zi, sfinti_str, apostol, evanghelie,
-                                  (nr % 3 == 0), s_extra, s_spec, s_an + s_familie)
+                                  (nr % 3 == 0), s_extra, s_spec, s_an + s_familie, lecturi_ctx)
             data['categorii'] = [CAT_PREDICA, CAT_TRAIESTE]
 
         elif tip in ['post', 'post_saptamana']:
-            data = _gen_zi_post(zi, sfinti_str, apostol, evanghelie, s_extra + s_familie, s_spec, tip)
+            data = _gen_zi_post(zi, sfinti_str, apostol, evanghelie, s_extra + s_familie, s_spec, tip, lecturi_ctx)
             data['categorii'] = [CAT_TRAIESTE]
             data['imagine_query'] = 'post'
 
         else:
-            data = _gen_zi_obisnuita(zi, sfinti_str, apostol, evanghelie, s_extra, s_spec, s_an + s_familie)
+            data = _gen_zi_obisnuita(zi, sfinti_str, apostol, evanghelie, s_extra, s_spec, s_an + s_familie, lecturi_ctx)
             data['categorii'] = [CAT_TRAIESTE, CAT_POSTARI_NOI]
 
         # Metadata backward-compat
@@ -2053,8 +2146,22 @@ WIDGET_DOXOLOGIA = """<div style="margin:24px 0;">
 def _bloc_sfinti(sfinti_list):
     if not sfinti_list:
         return ''
-    sfinti_str = ', '.join(sfinti_list)
     zi_str = get_zi_romana()
+    parts = []
+    for s in sfinti_list:
+        if isinstance(s, dict):
+            name = s.get('name', '')
+            url  = s.get('url', '')
+            if url:
+                parts.append(
+                    f'<a href="{url}" target="_blank" rel="noopener" '
+                    f'style="color:#4a3300;text-decoration:none;border-bottom:1px dotted #c9a227;">{name}</a>'
+                )
+            else:
+                parts.append(name)
+        else:
+            parts.append(s)
+    sfinti_html = ', '.join(parts)
     return (
         f'<div style="background:linear-gradient(135deg,#fffdf0,#fffbea);border:1px solid #e8d5a0;'
         f'border-left:5px solid #c9a227;padding:20px 24px;margin:0 0 24px 0;border-radius:0 8px 8px 0;'
@@ -2066,11 +2173,11 @@ def _bloc_sfinti(sfinti_list):
         f'<a href="https://doxologia.ro/calendar-ortodox" target="_blank" '
         f'style="color:#8B6914;text-decoration:none;">✦ Sfinții zilei ↗</a></p>'
         f'<p style="margin:0;color:#4a3300;line-height:1.9;font-style:italic;font-size:15px;'
-        f'font-family:Georgia,serif;">{sfinti_str}</p>'
+        f'font-family:Georgia,serif;">{sfinti_html}</p>'
         f'</div>'
     )
 
-def _bloc_lecturi(apostol, evanghelie):
+def _bloc_lecturi(apostol, evanghelie, ap_text='', ev_text='', ap_url='', ev_url=''):
     if not apostol and not evanghelie:
         return ''
     url_cal = 'https://doxologia.ro/calendar-ortodox'
@@ -2080,25 +2187,38 @@ def _bloc_lecturi(apostol, evanghelie):
         f'box-shadow:0 2px 8px rgba(139,0,0,0.08);">'
     )
     if apostol:
+        ap_link = ap_url or url_cal
+        gap = '8px' if ap_text else '18px'
         bloc += (
             f'<p style="margin:0 0 4px 0;font-size:11px;text-transform:uppercase;letter-spacing:2px;'
             f'color:#8B0000;font-weight:700;">'
-            f'<a href="{url_cal}" target="_blank" style="color:#8B0000;text-decoration:none;">✦ Apostolul zilei ↗</a></p>'
-            f'<p style="margin:0 0 18px 0;font-style:italic;color:#2c0000;line-height:1.9;font-size:15px;'
+            f'<a href="{ap_link}" target="_blank" rel="noopener" style="color:#8B0000;text-decoration:none;">✦ Apostolul zilei ↗</a></p>'
+            f'<p style="margin:0 0 {gap};font-style:italic;color:#2c0000;line-height:1.9;font-size:15px;'
             f'font-family:Georgia,serif;padding-left:12px;border-left:2px solid #c9a0a0;">{apostol}</p>'
         )
+        if ap_text:
+            bloc += (
+                f'<p style="margin:0 0 18px 0;color:#3a1000;line-height:2;font-size:14px;'
+                f'font-family:Georgia,serif;padding-left:12px;border-left:2px solid #e8c8c8;">{ap_text}</p>'
+            )
     if evanghelie:
+        ev_link = ev_url or url_cal
         bloc += (
             f'<p style="margin:0 0 4px 0;font-size:11px;text-transform:uppercase;letter-spacing:2px;'
             f'color:#8B0000;font-weight:700;">'
-            f'<a href="{url_cal}" target="_blank" style="color:#8B0000;text-decoration:none;">✦ Evanghelia zilei ↗</a></p>'
-            f'<p style="margin:0;font-style:italic;color:#2c0000;line-height:1.9;font-size:15px;'
+            f'<a href="{ev_link}" target="_blank" rel="noopener" style="color:#8B0000;text-decoration:none;">✦ Evanghelia zilei ↗</a></p>'
+            f'<p style="margin:0 0 {"8px" if ev_text else "0"};font-style:italic;color:#2c0000;line-height:1.9;font-size:15px;'
             f'font-family:Georgia,serif;padding-left:12px;border-left:2px solid #c9a0a0;">{evanghelie}</p>'
         )
+        if ev_text:
+            bloc += (
+                f'<p style="margin:0;color:#3a1000;line-height:2;font-size:14px;'
+                f'font-family:Georgia,serif;padding-left:12px;border-left:2px solid #e8c8c8;">{ev_text}</p>'
+            )
     bloc += '</div>'
     return bloc
 
-def _gen_zi_obisnuita(zi, sfinti, apostol, evanghelie, s_extra, s_spec, s_an):
+def _gen_zi_obisnuita(zi, sfinti, apostol, evanghelie, s_extra, s_spec, s_an, lecturi_ctx=None):
     u = f"""Astazi este {zi}. Sfintii zilei: {sfinti}.
 Apostolul zilei: {apostol}.
 Evanghelia zilei: {evanghelie}.{s_spec}{s_an}{s_extra}
@@ -2113,12 +2233,11 @@ JSON:
   "fb_text": "220-260 cuvinte: incepe cu un verset scurt exact din Apostol sau Evanghelie (din Biblia Ortodoxa Romana) pus intre ghilimele cu referinta (ex: Ioan 3,16) + mentionezi explicit sfintii zilei ({sfinti}) + meditatie calda 3-4 randuri stil Pr. Necula + intrebare sau indemn concret + la final adauga citatul despre familie din context (pe rand nou, italic, cu liniuta si autor) + #ParohiaCetate2Sibiu #EvanghelliaZilei #SfintiiZilei #FamiliaCrestina #Ortodox #Sibiu"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 4500))
-    # Inserez blocul lecturilor la inceput
-    d['continut_wp'] = _bloc_lecturi(apostol, evanghelie) + d.get('continut_wp','')
+    d['continut_wp'] = _bloc_lecturi(apostol, evanghelie, **(lecturi_ctx or {})) + d.get('continut_wp','')
     return d
 
 
-def _gen_duminica(zi, sfinti, apostol, evanghelie, ips, s_extra, s_spec, s_an):
+def _gen_duminica(zi, sfinti, apostol, evanghelie, ips, s_extra, s_spec, s_an, lecturi_ctx=None):
     ips_html = '<h2>Cuvânt arhieresc</h2><p>citat inspirat si autentic din predicile IPS Laurentiu Streza al Ardealului, cu referinta la mitropolia-ardealului.ro</p>' if ips else ''
     u = f"""Astazi este {zi}, Duminica. Sfintii zilei: {sfinti}.
 Apostolul Duminicii: {apostol}.
@@ -2132,11 +2251,11 @@ JSON:
   "fb_text": "250-280 cuvinte: verset exact din Evanghelia duminicii (din Biblia Ortodoxa Romana) pus intre ghilimele cu referinta + sfintii duminicii ({sfinti}) + meditatie duminicala calda 3-4 randuri + urare calduroasa + la final citatul despre familie din context (pe rand nou, italic, cu liniuta si autor) + #DuminicaOrtodoxa #FamiliaCrestina #ParohiaCetate2Sibiu #Evanghelie #Sibiu"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 5500))
-    d['continut_wp'] = _bloc_lecturi(apostol, evanghelie) + d.get('continut_wp','')
+    d['continut_wp'] = _bloc_lecturi(apostol, evanghelie, **(lecturi_ctx or {})) + d.get('continut_wp','')
     return d
 
 
-def _gen_sarbatoare(zi, nume, apostol, evanghelie, s_extra, s_spec, s_an):
+def _gen_sarbatoare(zi, nume, apostol, evanghelie, s_extra, s_spec, s_an, lecturi_ctx=None):
     u = f"""Astazi este {zi} - {nume}.
 Apostolul sarbatorii: {apostol}.
 Evanghelia sarbatorii: {evanghelie}.{s_spec}{s_an}{s_extra}
@@ -2150,11 +2269,11 @@ JSON:
   "fb_text": "220-260 cuvinte: urare calda de sarbatoare + verset exact din Evanghelia sarbatorii (din Biblia Ortodoxa Romana) intre ghilimele cu referinta + Tropar scurt + meditatie 2-3 randuri + indemn la slujba + emoji potrivite + #ParohiaCetate2Sibiu #{nume.replace(' ','')} #Ortodox #Sibiu"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 5000))
-    d['continut_wp'] = _bloc_lecturi(apostol, evanghelie) + d.get('continut_wp','')
+    d['continut_wp'] = _bloc_lecturi(apostol, evanghelie, **(lecturi_ctx or {})) + d.get('continut_wp','')
     return d
 
 
-def _gen_inceput_post(zi, nume, apostol, evanghelie, s_extra, s_an):
+def _gen_inceput_post(zi, nume, apostol, evanghelie, s_extra, s_an, lecturi_ctx=None):
     u = f"""Astazi este {zi} - incepe {nume}.
 Apostolul zilei: {apostol}.
 Evanghelia zilei: {evanghelie}.{s_an}{s_extra}
@@ -2167,11 +2286,11 @@ JSON:
   "fb_text": "200-240 cuvinte: caldura pastorala + citat patristic despre post + indemn concret + Post cu folos! + hashtag-uri #Post{nume.replace(' ','')} #ParohiaCetate2Sibiu #Ortodox"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 4500))
-    d['continut_wp'] = _bloc_lecturi(apostol, evanghelie) + d.get('continut_wp','')
+    d['continut_wp'] = _bloc_lecturi(apostol, evanghelie, **(lecturi_ctx or {})) + d.get('continut_wp','')
     return d
 
 
-def _gen_zi_post(zi, sfinti, apostol, evanghelie, s_extra, s_spec, tip):
+def _gen_zi_post(zi, sfinti, apostol, evanghelie, s_extra, s_spec, tip, lecturi_ctx=None):
     ton = "Miercuri sau Vineri de post - zi de infranare si rugaciune sporita" if tip == 'post' else "zi de post in Postul Mare"
     u = f"""Astazi este {zi} - {ton}. Sfintii zilei: {sfinti}.
 Apostolul zilei: {apostol}.
@@ -2185,11 +2304,11 @@ JSON:
   "fb_text": "180-220 cuvinte: verset exact din Apostol sau Evanghelie (din Biblia Ortodoxa Romana) intre ghilimele + sfintii zilei ({sfinti}) + citat patristic scurt despre post + indemn concret pentru zi de post + la final citatul despre familie din context (pe rand nou, italic) + #ZiDePost #FamiliaCrestina #ParohiaCetate2Sibiu #Ortodox"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 4000))
-    d['continut_wp'] = _bloc_lecturi(apostol, evanghelie) + d.get('continut_wp','')
+    d['continut_wp'] = _bloc_lecturi(apostol, evanghelie, **(lecturi_ctx or {})) + d.get('continut_wp','')
     return d
 
 
-def _gen_saptamana_mare(zi, titlu_zi, tema_zi, apostol, evanghelie, s_extra):
+def _gen_saptamana_mare(zi, titlu_zi, tema_zi, apostol, evanghelie, s_extra, lecturi_ctx=None):
     u = f"""Astazi este {zi} - {titlu_zi}. Tema: {tema_zi}.
 Apostolul zilei: {apostol}.
 Evanghelia zilei: {evanghelie}.{s_extra}
@@ -2203,7 +2322,7 @@ JSON:
   "fb_text": "200-240 cuvinte: solemn cu nadejde + Apostol + Evanghelie + taina zilei + emoji ✝ + #SaptamanaMare #{titlu_zi.replace(' ','')} #ParohiaCetate2Sibiu"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 5000))
-    d['continut_wp'] = _bloc_lecturi(apostol, evanghelie) + d.get('continut_wp','')
+    d['continut_wp'] = _bloc_lecturi(apostol, evanghelie, **(lecturi_ctx or {})) + d.get('continut_wp','')
     return d
 
 
@@ -2212,8 +2331,15 @@ def _gen_din_poza(img_b64, caption=''):
     _zd = fetch_doxologia_calendar(get_azi())
     apostol    = _zd['apostle']['reference'] or _zd['apostle']['text']
     evanghelie = _zd['gospel']['reference']  or _zd['gospel']['text']
+    _lctx = {
+        'ap_text': _zd['apostle'].get('text', ''),
+        'ev_text': _zd['gospel'].get('text', ''),
+        'ap_url':  _zd['apostle'].get('url', ''),
+        'ev_url':  _zd['gospel'].get('url', ''),
+    }
     if not apostol:
         apostol, evanghelie = scrape_pilde_solomon()
+        _lctx = {}
     s_cap = f"Textul preotului (integreaza natural): {caption}" if caption else ''
     u = f"""Astazi este {zi}. {s_cap}
 Apostolul zilei: {apostol or ''}.
@@ -2227,7 +2353,7 @@ JSON:
   "fb_text": "200-240 cuvinte: calda, invitanta, context spiritual + hashtag-uri #ParohiaCetate2Sibiu #ViataParohiei #Sibiu"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 3500, img_b64=img_b64))
-    d['continut_wp'] = _bloc_lecturi(apostol, evanghelie) + d.get('continut_wp','')
+    d['continut_wp'] = _bloc_lecturi(apostol, evanghelie, **_lctx) + d.get('continut_wp','')
     return d
 
 
@@ -2236,8 +2362,15 @@ def _gen_din_text(text):
     _zd = fetch_doxologia_calendar(get_azi())
     apostol    = _zd['apostle']['reference'] or _zd['apostle']['text']
     evanghelie = _zd['gospel']['reference']  or _zd['gospel']['text']
+    _lctx = {
+        'ap_text': _zd['apostle'].get('text', ''),
+        'ev_text': _zd['gospel'].get('text', ''),
+        'ap_url':  _zd['apostle'].get('url', ''),
+        'ev_url':  _zd['gospel'].get('url', ''),
+    }
     if not apostol:
         apostol, evanghelie = scrape_pilde_solomon()
+        _lctx = {}
     u = f"""Astazi este {zi}.
 Apostolul zilei: {apostol or ''}.
 Evanghelia zilei: {evanghelie or ''}.
@@ -2251,7 +2384,7 @@ JSON:
   "fb_text": "190-230 cuvinte + emoji + #ParohiaCetate2Sibiu #Sibiu"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 3500))
-    d['continut_wp'] = _bloc_lecturi(apostol, evanghelie) + d.get('continut_wp','')
+    d['continut_wp'] = _bloc_lecturi(apostol, evanghelie, **_lctx) + d.get('continut_wp','')
     return d
 
 
@@ -2260,8 +2393,15 @@ def _gen_din_audio(transcriptie, caption=''):
     _zd = fetch_doxologia_calendar(get_azi())
     apostol    = _zd['apostle']['reference'] or _zd['apostle']['text']
     evanghelie = _zd['gospel']['reference']  or _zd['gospel']['text']
+    _lctx = {
+        'ap_text': _zd['apostle'].get('text', ''),
+        'ev_text': _zd['gospel'].get('text', ''),
+        'ap_url':  _zd['apostle'].get('url', ''),
+        'ev_url':  _zd['gospel'].get('url', ''),
+    }
     if not apostol:
         apostol, evanghelie = scrape_pilde_solomon()
+        _lctx = {}
     s_cap = f"Text suplimentar: {caption}" if caption else ''
     u = f"""Astazi este {zi}.
 Apostolul zilei: {apostol or ''}.
@@ -2277,7 +2417,7 @@ JSON:
   "fb_text": "190-230 cuvinte + #ParohiaCetate2Sibiu #Sibiu"
 }}"""
     d = parse_json_robust(call_claude(SYSTEM, u, 3500))
-    d['continut_wp'] = _bloc_lecturi(apostol, evanghelie) + d.get('continut_wp','')
+    d['continut_wp'] = _bloc_lecturi(apostol, evanghelie, **_lctx) + d.get('continut_wp','')
     return d
 
 # ============================================================
@@ -2681,6 +2821,18 @@ def webhook():
                         f"Sau doar <code>TITLU: titlul nou</code> pentru a schimba doar titlul."
                     )
 
+            # ── Schimbă titlul (buton rapid) ─────────────────────────
+            elif cb_data == 'edit_titlu':
+                if not pending_articol:
+                    tg_answer_callback(cb_id, 'Nu există articol.')
+                else:
+                    tg_answer_callback(cb_id, '')
+                    edit_mode = 'titlu'
+                    tg_send(
+                        f"<b>Titlu curent:</b> {pending_articol.get('titlu_wp','—')}\n\n"
+                        f"Trimite titlul nou (un singur rând de text):"
+                    )
+
         return jsonify({'ok': True})
 
     msg     = update.get('message', {})
@@ -3003,11 +3155,12 @@ def webhook():
                     sfinti = zi_data.get('saints', [])
                     apostol = zi_data['apostle']['reference'] or zi_data['apostle']['text']
                     evanghelie = zi_data['gospel']['reference'] or zi_data['gospel']['text']
+                    _lctx = {'ap_text': zi_data['apostle'].get('text',''), 'ev_text': zi_data['gospel'].get('text',''), 'ap_url': zi_data['apostle'].get('url',''), 'ev_url': zi_data['gospel'].get('url','')}
                     titlu = f"Moment de parohie — {get_zi_romana(dt)}"
                     corp = caption if caption else "Imaginea de astăzi de la parohia noastră."
                     paragraphs = [p.strip() for p in corp.split('\n') if p.strip()]
                     continut_html = ''.join(f'<p>{p}</p>' for p in paragraphs)
-                    continut_wp = _bloc_sfinti(sfinti) + _bloc_lecturi(apostol, evanghelie) + continut_html + get_bloc_familie()
+                    continut_wp = _bloc_sfinti(sfinti) + _bloc_lecturi(apostol, evanghelie, **_lctx) + continut_html + get_bloc_familie()
                     fb_text = corp[:400] + '\n\n#ParohiaCetate2 #CalendarOrtodox'
                     data = {
                         'titlu_wp': titlu,
@@ -3080,12 +3233,13 @@ def webhook():
                     sfinti = zi_data.get('saints', [])
                     apostol = zi_data['apostle']['reference'] or zi_data['apostle']['text']
                     evanghelie = zi_data['gospel']['reference'] or zi_data['gospel']['text']
+                    _lctx = {'ap_text': zi_data['apostle'].get('text',''), 'ev_text': zi_data['gospel'].get('text',''), 'ap_url': zi_data['apostle'].get('url',''), 'ev_url': zi_data['gospel'].get('url','')}
                     titlu_m = re.search(r'TITLU:\s*(.+?)(?:\n|$)', transcriptie, re.IGNORECASE)
                     titlu = titlu_m.group(1).strip() if titlu_m else f"Cuvânt de folos — {get_zi_romana(dt)}"
                     corp = re.sub(r'TITLU:\s*.+?(\n|$)', '', transcriptie, flags=re.IGNORECASE).strip()
                     paragraphs = [p.strip() for p in corp.split('\n') if p.strip()]
                     continut_html = ''.join(f'<p>{p}</p>' for p in paragraphs)
-                    continut_wp = _bloc_sfinti(sfinti) + _bloc_lecturi(apostol, evanghelie) + continut_html + get_bloc_familie()
+                    continut_wp = _bloc_sfinti(sfinti) + _bloc_lecturi(apostol, evanghelie, **_lctx) + continut_html + get_bloc_familie()
                     fb_text = corp[:400] + '\n\n#ParohiaCetate2 #CalendarOrtodox'
                     data = {
                         'titlu_wp': titlu,
@@ -3111,7 +3265,15 @@ def webhook():
         threading.Thread(target=proc_audio).start()
 
     elif text and not text.startswith('/'):
-        if edit_mode == 'fb' and pending_articol:
+        if edit_mode == 'titlu' and pending_articol:
+            titlu_text = text.strip()
+            if titlu_text:
+                pending_articol['titlu_wp'] = titlu_text
+                _save_pending(pending_articol)
+                edit_mode = None
+                lv_t = pending_articol.get('liturgical_status') or validate_liturgical_data(pending_articol.get('zi_data') or {})
+                tg_send(f"✓ Titlu actualizat:\n<b>{titlu_text}</b>", reply_markup=_get_inline_keyboard_main(lv_t))
+        elif edit_mode == 'fb' and pending_articol:
             pending_articol['fb_text'] = text
             edit_mode = None
             tg_send("✓ Text Facebook actualizat!\n\n/aproba - publica acum\n/respinge - nu publica azi")
@@ -3218,6 +3380,7 @@ def webhook():
                     sfinti = zi_data.get('saints', [])
                     apostol = zi_data['apostle']['reference'] or zi_data['apostle']['text']
                     evanghelie = zi_data['gospel']['reference'] or zi_data['gospel']['text']
+                    _lctx = {'ap_text': zi_data['apostle'].get('text',''), 'ev_text': zi_data['gospel'].get('text',''), 'ap_url': zi_data['apostle'].get('url',''), 'ev_url': zi_data['gospel'].get('url','')}
                     titlu_m = re.search(r'TITLU:\s*(.+?)(?:\n|$)', manual_text, re.IGNORECASE)
                     continut_m = re.search(r'CONTINUT:\s*([\s\S]+)', manual_text, re.IGNORECASE)
                     if titlu_m:
@@ -3228,7 +3391,7 @@ def webhook():
                         corp = manual_text
                     paragraphs = [p.strip() for p in corp.split('\n') if p.strip()]
                     continut_html = ''.join(f'<p>{p}</p>' for p in paragraphs)
-                    continut_wp = _bloc_sfinti(sfinti) + _bloc_lecturi(apostol, evanghelie) + continut_html + get_bloc_familie()
+                    continut_wp = _bloc_sfinti(sfinti) + _bloc_lecturi(apostol, evanghelie, **_lctx) + continut_html + get_bloc_familie()
                     fb_text = corp[:400] + '\n\n#ParohiaCetate2 #CalendarOrtodox'
                     data = {
                         'titlu_wp': titlu,
@@ -3407,7 +3570,7 @@ def ep_test():
             f'border-bottom:1px solid #f0e8e8;">{icon} {value or "—"}</td></tr>'
         )
 
-    saints_html = '<br>'.join(zi_data['saints']) if zi_data['saints'] else '—'
+    saints_html = '<br>'.join(_saint_names(zi_data['saints'])) if zi_data['saints'] else '—'
     warnings_html = ''
     if zi_data['warnings']:
         items = ''.join(f'<li>{w}</li>' for w in zi_data['warnings'])
