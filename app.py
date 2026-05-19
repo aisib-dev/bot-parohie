@@ -577,7 +577,8 @@ def _parse_calendar_zi_section(section):
 
 def fetch_doxologia_calendar(dt):
     """Preia calendarul ortodox de pe doxologia.ro pentru data specificata.
-    Foloseste URL-ul specific zilei (ex: /18-mai) si mai multi selectori CSS fallback.
+    Foloseste URL-ul specific zilei (ex: /19-mai).
+    Strategii de parsare in ordine: href pattern, text pattern, CSS class, meta/h1.
     """
     zi_data = new_zi_data(dt)
     luni_ro = ['ianuarie','februarie','martie','aprilie','mai','iunie',
@@ -588,7 +589,7 @@ def fetch_doxologia_calendar(dt):
 
     try:
         h = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        r = requests.get(url_zi, headers=h, timeout=12)
+        r = requests.get(url_zi, headers=h, timeout=15)
         debug.append(f"HTTP {r.status_code} — {url_zi}")
         if r.status_code != 200:
             zi_data['warnings'].append(f'doxologia.ro indisponibil (HTTP {r.status_code}): {url_zi}')
@@ -597,86 +598,101 @@ def fetch_doxologia_calendar(dt):
         html = r.text
         saints, ap_ref, ev_ref = [], '', ''
 
-        # Strategia 1: div.calendar-zi (selectorul original)
-        selectors_tried = []
-        for cls_pat in ['calendar-zi', 'calendar-day', 'zi-calendar', 'zi_calendar',
-                        'content-calendar', 'calendar-content', 'liturgic']:
-            pat = rf'<div[^>]*class="[^"]*{cls_pat}[^"]*"[^>]*>([\s\S]*?)</div>'
-            m = re.search(pat, html)
-            selectors_tried.append(cls_pat)
-            if m:
-                s, a, e = _parse_calendar_zi_section(m.group(1))
-                if s or a or e:
-                    saints, ap_ref, ev_ref = s, a, e
-                    debug.append(f"Selector gasit: div.{cls_pat} → sfinti={len(s)}, ap={bool(a)}, ev={bool(e)}")
-                    break
+        # ── Strategia 1 (PRIMARA): href pattern ──────────────────────────────
+        # Apostol: <a href="/apostol/ap-...">Ap. Fapte 17, 19-28</a>
+        for m in re.finditer(r'<a[^>]+href="(/apostol/ap-[^"]+)"[^>]*>\s*([^<]{3,80}?)\s*</a>', html):
+            txt = m.group(2).strip()
+            if txt and not ap_ref:
+                ap_ref = txt
+                debug.append(f"Apostol din href /apostol/: {txt}")
 
-        # Strategia 2: cauta link-uri cu class ev-zi oriunde in pagina (fara sa depinda de div parinte)
-        if not ap_ref and not ev_ref:
-            selectors_tried.append('ev-zi global scan')
-            for cls, txt in re.findall(
-                r'<a[^>]+class="([^"]*ev-zi[^"]*)"[^>]*>\s*([^<]{3,150}?)\s*</a>', html
-            ):
-                txt = txt.strip()
-                if not txt:
-                    continue
+        # Evanghelie: <a href="/ev-...">Ev. Ioan 12, 19-36</a>
+        for m in re.finditer(r'<a[^>]+href="(/ev-[^"]+)"[^>]*>\s*([^<]{3,80}?)\s*</a>', html):
+            txt = m.group(2).strip()
+            if txt and not ev_ref:
+                ev_ref = txt
+                debug.append(f"Evanghelie din href /ev-: {txt}")
+
+        # Sfinti: <a href="/sfant...">Sfântul/Sfânta/Cuvios ...</a>
+        seen_saints = set()
+        for m in re.finditer(
+            r'<a[^>]+href="/(?:sfant[^"]*|cuvio[^"]*|mucenic[^"]*|ierarh[^"]*|proroc[^"]*|apostol-[^"]*)"[^>]*>\s*([^<]{4,150}?)\s*</a>',
+            html, re.IGNORECASE
+        ):
+            txt = m.group(1).strip()
+            if txt and txt not in seen_saints and len(txt) > 4:
+                seen_saints.add(txt)
+                saints.append(txt)
+        if saints:
+            debug.append(f"Sfinti din href pattern: {len(saints)}")
+
+        # ── Strategia 2: text pattern (Ap./Ev. oriunde in linkuri) ───────────
+        if not ap_ref or not ev_ref:
+            for m in re.finditer(r'<a[^>]*>\s*([^<]{3,80}?)\s*</a>', html):
+                txt = m.group(1).strip()
                 tl = txt.lower()
-                if (tl.startswith('ap.') or tl.startswith('ap ')) and not ap_ref:
+                if not ap_ref and (tl.startswith('ap.') or tl.startswith('ap ')):
                     ap_ref = txt
-                elif (tl.startswith('ev.') or tl.startswith('ev ')) and not ev_ref:
+                    debug.append(f"Apostol din text pattern: {txt}")
+                elif not ev_ref and (tl.startswith('ev.') or tl.startswith('ev ')):
+                    ev_ref = txt
+                    debug.append(f"Evanghelie din text pattern: {txt}")
+
+        # Sfinti din text pattern daca href n-a gasit nimic
+        if not saints:
+            for m in re.finditer(r'<a[^>]*>\s*((?:Sf[âa]nt[^<]{2,}|Cuvio[^<]{2,}|Mucenic[^<]{2,}|Ierarh[^<]{2,}|Proroc[^<]{2,}))\s*</a>', html, re.IGNORECASE):
+                txt = m.group(1).strip()
+                if txt and txt not in seen_saints and len(txt) > 4:
+                    seen_saints.add(txt)
+                    saints.append(txt)
+            if saints:
+                debug.append(f"Sfinti din text pattern: {len(saints)}")
+
+        # ── Strategia 3: CSS class ev-zi (structura veche) ───────────────────
+        if not ap_ref and not ev_ref:
+            for cls, txt in re.findall(r'<a[^>]+class="([^"]*ev-zi[^"]*)"[^>]*>\s*([^<]{3,80}?)\s*</a>', html):
+                txt = txt.strip()
+                tl = txt.lower()
+                if not ap_ref and (tl.startswith('ap.') or tl.startswith('ap ')):
+                    ap_ref = txt
+                elif not ev_ref and (tl.startswith('ev.') or tl.startswith('ev ')):
                     ev_ref = txt
             if ap_ref or ev_ref:
-                debug.append(f"Lecturi gasite prin scanare ev-zi globala: ap={bool(ap_ref)}, ev={bool(ev_ref)}")
+                debug.append(f"Lecturi din clasa ev-zi: ap={bool(ap_ref)}, ev={bool(ev_ref)}")
 
-        # Strategia 3: cauta sfintii in meta description sau h1/h2/h3
+        # ── Strategia 4: div.calendar-zi (structura veche) ───────────────────
+        if not saints and not ap_ref and not ev_ref:
+            for cls_pat in ['calendar-zi', 'calendar-day', 'liturgic']:
+                m = re.search(rf'<div[^>]*class="[^"]*{cls_pat}[^"]*"[^>]*>([\s\S]*?)</div>', html)
+                if m:
+                    s, a, e = _parse_calendar_zi_section(m.group(1))
+                    if s or a or e:
+                        saints = saints or s
+                        ap_ref = ap_ref or a
+                        ev_ref = ev_ref or e
+                        debug.append(f"Date din div.{cls_pat}: sfinti={len(s)}, ap={bool(a)}, ev={bool(e)}")
+                        break
+
+        # ── Strategia 5: meta description ─────────────────────────────────────
         if not saints:
-            selectors_tried.append('meta description')
-            meta = re.search(
-                r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)', html, re.IGNORECASE
-            )
+            meta = re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)', html, re.IGNORECASE)
             if meta:
                 desc = meta.group(1)
-                m_sfinti = re.search(
-                    r'(?:pomenim pe|Sfintii zilei:?|sfintii:)\s*([^.;]+)',
-                    desc, re.IGNORECASE
-                )
-                if m_sfinti:
-                    names = [n.strip() for n in m_sfinti.group(1).split(',') if len(n.strip()) > 2]
+                m_s = re.search(r'(?:pomenim pe|Sfintii zilei:?)\s*([^.;]+)', desc, re.IGNORECASE)
+                if m_s:
+                    names = [n.strip() for n in m_s.group(1).split(',') if len(n.strip()) > 2]
                     if names:
                         saints = names
-                        debug.append(f"Sfinti din meta description: {len(saints)}")
+                        debug.append(f"Sfinti din meta: {len(saints)}")
 
-        if not saints:
-            selectors_tried.append('h1/h2/h3')
-            for tag_m in re.finditer(r'<h[123][^>]*>([^<]+)</h[123]>', html):
-                txt = tag_m.group(1).strip()
-                if any(kw in txt.lower() for kw in ('sfant', 'sfinti', 'sfantul', 'sfanta', 'cuvios')):
-                    saints = [txt]
-                    debug.append(f"Sfant din titlu h1/h2/h3: {txt[:60]}")
-                    break
+        debug.append(f"FINAL: sfinti={len(saints)}, ap={bool(ap_ref)}, ev={bool(ev_ref)}")
 
-        # Strategia 4: JSON-LD schema.org
-        if not saints and not ap_ref:
-            selectors_tried.append('JSON-LD')
-            for jld in re.findall(
-                r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>', html
-            ):
-                try:
-                    obj = json.loads(jld)
-                    desc_ld = obj.get('description', '') if isinstance(obj, dict) else ''
-                    if 'sfant' in desc_ld.lower() or 'ap.' in desc_ld.lower():
-                        debug.append(f"JSON-LD gasit: {desc_ld[:80]}")
-                except Exception:
-                    pass
-
-        debug.append(f"Selectori incercati: {', '.join(selectors_tried)}")
-
-        zi_data['saints']  = saints
+        zi_data['saints']  = list(dict.fromkeys(saints))  # deduplica
         zi_data['apostle'] = {'reference': ap_ref, 'text': ''}
         zi_data['gospel']  = {'reference': ev_ref, 'text': ''}
 
         if not saints:
-            zi_data['warnings'].append(f'Sfintii zilei lipsesc (incercat: {", ".join(selectors_tried)})')
+            zi_data['warnings'].append('Sfintii zilei lipsesc')
         if not ap_ref:
             zi_data['warnings'].append('Referinta Apostolului lipseste')
         if not ev_ref:
