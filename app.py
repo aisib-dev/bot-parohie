@@ -23,10 +23,13 @@ TG_CHAT_ID    = os.environ.get('TG_CHAT_ID', '')
 FB_PAGE_TOKEN = os.environ.get('FB_PAGE_TOKEN', '')
 FB_PAGE_ID    = os.environ.get('FB_PAGE_ID', '')
 APP_URL       = os.environ.get('APP_URL', 'https://bot-parohie.onrender.com')
-ORA_GENERARE  = int(os.environ.get('ORA_GENERARE', '8'))  # ora locala Romania
+ORA_GENERARE           = int(os.environ.get('ORA_GENERARE', '8'))  # ora locala Romania
+TELEGRAM_UI_MODE       = os.environ.get('TELEGRAM_UI_MODE', 'admin')  # 'client' sau 'admin'
+REQUIRE_VERIFIED_VERSE = os.environ.get('REQUIRE_VERIFIED_VERSE', 'false').lower() == 'true'
 
 client = OpenAI(api_key=GROQ_KEY, base_url="https://api.groq.com/openai/v1")
-edit_mode = None  # 'fb' sau 'wp'
+edit_mode = None  # 'fb', 'wp', 'scrie', 'manual'
+_manual_step = None  # 'sfinti', 'apostol', 'evanghelie', 'verset'
 
 PENDING_FILE = '/tmp/pending_articol.json'
 
@@ -574,40 +577,116 @@ def _parse_calendar_zi_section(section):
 
 def fetch_doxologia_calendar(dt):
     """Preia calendarul ortodox de pe doxologia.ro pentru data specificata.
-    Foloseste URL-ul specific zilei (ex: /18-mai) pentru a evita preluarea
-    gresita a primei zile din luna de pe pagina calendarului lunar.
+    Foloseste URL-ul specific zilei (ex: /18-mai) si mai multi selectori CSS fallback.
     """
     zi_data = new_zi_data(dt)
     luni_ro = ['ianuarie','februarie','martie','aprilie','mai','iunie',
                'iulie','august','septembrie','octombrie','noiembrie','decembrie']
     url_zi = f"https://doxologia.ro/{dt.day}-{luni_ro[dt.month - 1]}"
     zi_data['sources']['doxologia'] = url_zi
+    debug = []
+
     try:
         h = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         r = requests.get(url_zi, headers=h, timeout=12)
+        debug.append(f"HTTP {r.status_code} — {url_zi}")
         if r.status_code != 200:
             zi_data['warnings'].append(f'doxologia.ro indisponibil (HTTP {r.status_code}): {url_zi}')
+            zi_data['doxologia_debug'] = debug
             return zi_data
         html = r.text
+        saints, ap_ref, ev_ref = [], '', ''
 
-        m = re.search(r'<div[^>]*class="[^"]*calendar-zi[^"]*"[^>]*>([\s\S]*?)</div>', html)
-        if not m:
-            zi_data['warnings'].append(f'Nu s-a gasit div.calendar-zi pe {url_zi}')
-            return zi_data
+        # Strategia 1: div.calendar-zi (selectorul original)
+        selectors_tried = []
+        for cls_pat in ['calendar-zi', 'calendar-day', 'zi-calendar', 'zi_calendar',
+                        'content-calendar', 'calendar-content', 'liturgic']:
+            pat = rf'<div[^>]*class="[^"]*{cls_pat}[^"]*"[^>]*>([\s\S]*?)</div>'
+            m = re.search(pat, html)
+            selectors_tried.append(cls_pat)
+            if m:
+                s, a, e = _parse_calendar_zi_section(m.group(1))
+                if s or a or e:
+                    saints, ap_ref, ev_ref = s, a, e
+                    debug.append(f"Selector gasit: div.{cls_pat} → sfinti={len(s)}, ap={bool(a)}, ev={bool(e)}")
+                    break
 
-        saints, ap_ref, ev_ref = _parse_calendar_zi_section(m.group(1))
+        # Strategia 2: cauta link-uri cu class ev-zi oriunde in pagina (fara sa depinda de div parinte)
+        if not ap_ref and not ev_ref:
+            selectors_tried.append('ev-zi global scan')
+            for cls, txt in re.findall(
+                r'<a[^>]+class="([^"]*ev-zi[^"]*)"[^>]*>\s*([^<]{3,150}?)\s*</a>', html
+            ):
+                txt = txt.strip()
+                if not txt:
+                    continue
+                tl = txt.lower()
+                if (tl.startswith('ap.') or tl.startswith('ap ')) and not ap_ref:
+                    ap_ref = txt
+                elif (tl.startswith('ev.') or tl.startswith('ev ')) and not ev_ref:
+                    ev_ref = txt
+            if ap_ref or ev_ref:
+                debug.append(f"Lecturi gasite prin scanare ev-zi globala: ap={bool(ap_ref)}, ev={bool(ev_ref)}")
+
+        # Strategia 3: cauta sfintii in meta description sau h1/h2/h3
+        if not saints:
+            selectors_tried.append('meta description')
+            meta = re.search(
+                r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)', html, re.IGNORECASE
+            )
+            if meta:
+                desc = meta.group(1)
+                m_sfinti = re.search(
+                    r'(?:pomenim pe|Sfintii zilei:?|sfintii:)\s*([^.;]+)',
+                    desc, re.IGNORECASE
+                )
+                if m_sfinti:
+                    names = [n.strip() for n in m_sfinti.group(1).split(',') if len(n.strip()) > 2]
+                    if names:
+                        saints = names
+                        debug.append(f"Sfinti din meta description: {len(saints)}")
+
+        if not saints:
+            selectors_tried.append('h1/h2/h3')
+            for tag_m in re.finditer(r'<h[123][^>]*>([^<]+)</h[123]>', html):
+                txt = tag_m.group(1).strip()
+                if any(kw in txt.lower() for kw in ('sfant', 'sfinti', 'sfantul', 'sfanta', 'cuvios')):
+                    saints = [txt]
+                    debug.append(f"Sfant din titlu h1/h2/h3: {txt[:60]}")
+                    break
+
+        # Strategia 4: JSON-LD schema.org
+        if not saints and not ap_ref:
+            selectors_tried.append('JSON-LD')
+            for jld in re.findall(
+                r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>', html
+            ):
+                try:
+                    obj = json.loads(jld)
+                    desc_ld = obj.get('description', '') if isinstance(obj, dict) else ''
+                    if 'sfant' in desc_ld.lower() or 'ap.' in desc_ld.lower():
+                        debug.append(f"JSON-LD gasit: {desc_ld[:80]}")
+                except Exception:
+                    pass
+
+        debug.append(f"Selectori incercati: {', '.join(selectors_tried)}")
+
         zi_data['saints']  = saints
         zi_data['apostle'] = {'reference': ap_ref, 'text': ''}
         zi_data['gospel']  = {'reference': ev_ref, 'text': ''}
 
         if not saints:
-            zi_data['warnings'].append('Nu s-au gasit sfinti pe doxologia.ro')
+            zi_data['warnings'].append(f'Sfintii zilei lipsesc (incercat: {", ".join(selectors_tried)})')
         if not ap_ref:
-            zi_data['warnings'].append('Apostolul nu a putut fi extras')
+            zi_data['warnings'].append('Referinta Apostolului lipseste')
         if not ev_ref:
-            zi_data['warnings'].append('Evanghelia nu a putut fi extrasa')
+            zi_data['warnings'].append('Referinta Evangheliei lipseste')
+
     except Exception as e:
         zi_data['warnings'].append(f'Eroare doxologia.ro: {str(e)[:80]}')
+        debug.append(f'Exceptie: {str(e)[:80]}')
+
+    zi_data['doxologia_debug'] = debug
     return zi_data
 
 def _normalize_biblia_ref(ref):
@@ -893,6 +972,42 @@ def validate_post_data(zi_data):
         zi_data['warnings'].append('⚠ Versetul nu a putut fi verificat pe bibliaortodoxa.ro')
     return zi_data
 
+def validate_liturgical_data(zi_data):
+    """Valideaza datele liturgice si returneaza status structurat.
+    Returns: {'status': 'ready'|'manual_review'|'blocked', 'status_label': str,
+              'critical_errors': list, 'warnings': list}
+    """
+    critical = []
+    warnings = []
+    if not zi_data.get('saints'):
+        critical.append('Sfintii zilei lipsesc')
+    if not zi_data.get('apostle', {}).get('reference'):
+        critical.append('Referinta Apostolului lipseste')
+    if not zi_data.get('gospel', {}).get('reference'):
+        critical.append('Referinta Evangheliei lipseste')
+    verse_ok = zi_data.get('selected_verse', {}).get('verified', False)
+    if not verse_ok:
+        if REQUIRE_VERIFIED_VERSE:
+            critical.append('Versetul biblic nu a fost verificat pe bibliaortodoxa.ro')
+        else:
+            warnings.append('Versetul biblic nu a fost verificat pe bibliaortodoxa.ro')
+    manual = zi_data.get('manual_input', False)
+    if critical:
+        status = 'blocked'
+        label = '🔴 NU PUBLICA – DATE LITURGICE LIPSĂ'
+    elif warnings or manual:
+        status = 'manual_review'
+        label = '🟡 NECESITĂ VERIFICARE MANUALĂ'
+    else:
+        status = 'ready'
+        label = '🟢 GATA DE PUBLICARE'
+    return {
+        'status': status,
+        'status_label': label,
+        'critical_errors': critical,
+        'warnings': warnings,
+    }
+
 def _make_zi_context(zi_data):
     saints_str = ', '.join(zi_data['saints']) if zi_data['saints'] else 'Sfintii zilei'
     ap_ref = zi_data['apostle'].get('reference', '')
@@ -918,6 +1033,9 @@ SYS_PASTORAL = (
 
 def generate_pastoral_reflection(zi_data):
     """Returneaza o singura reflectie pastorala (3-6 fraze). Retried daca contine expresii interzise."""
+    if (not zi_data.get('saints') and not zi_data.get('apostle', {}).get('reference')
+            and not zi_data.get('gospel', {}).get('reference')):
+        return ''
     ctx = _make_zi_context(zi_data)
     prompt = (
         ctx
@@ -943,6 +1061,9 @@ def generate_pastoral_variants(zi_data):
     """Genereaza 3 variante de Cuvant de folos cu stiluri diferite.
     Returneaza {'scurt': ..., 'duhovnicesc': ..., 'catehetic': ...}
     """
+    if (not zi_data.get('saints') and not zi_data.get('apostle', {}).get('reference')
+            and not zi_data.get('gospel', {}).get('reference')):
+        return {'scurt': '', 'duhovnicesc': '', 'catehetic': ''}
     ctx = _make_zi_context(zi_data)
     styles = {
         'scurt': (
@@ -1004,18 +1125,40 @@ def build_facebook_post(zi_data, wp_link=''):
     parts.append("#ParohiaCetate2 #CalendarOrtodox #SfintiiZilei #EvangheliaZilei")
     return '\n\n'.join(parts)
 
-def build_telegram_preview(zi_data, titlu_wp=''):
-    """Preview Telegram cu surse verificate, 3 variante cuvant de folos si avertismente."""
-    saints_str = ', '.join(zi_data['saints']) if zi_data['saints'] else '—'
-    ap_ref  = zi_data['apostle'].get('reference', '—')
-    ev_ref  = zi_data['gospel'].get('reference', '—')
-    v_ref   = zi_data['selected_verse'].get('reference', '')
-    v_ok    = zi_data['selected_verse'].get('verified', False)
-    v_url   = zi_data['selected_verse'].get('source_url', '')
+def build_telegram_preview(zi_data, titlu_wp='', liturgical_status=None):
+    """Preview Telegram cu status liturgic, surse verificate si avertismente."""
+    if liturgical_status is None:
+        liturgical_status = validate_liturgical_data(zi_data)
+    lv = liturgical_status
+
+    saints_str = ', '.join(_saint_names(zi_data.get('saints', []))) or '—'
+    ap_ref  = zi_data.get('apostle', {}).get('reference', '') or '—'
+    ev_ref  = zi_data.get('gospel', {}).get('reference', '') or '—'
+    v_ref   = zi_data.get('selected_verse', {}).get('reference', '')
+    v_ok    = zi_data.get('selected_verse', {}).get('verified', False)
+    v_url   = zi_data.get('selected_verse', {}).get('source_url', '')
     warnings = zi_data.get('warnings', [])
     variants = zi_data.get('pastoral_variants', {})
+    manual  = zi_data.get('manual_input', False)
 
-    lines = ['<b>ARTICOL GENERAT</b>']
+    lines = [f'<b>{lv["status_label"]}</b>']
+    if manual:
+        lines.append('<i>Date introduse manual — necesita verificare.</i>')
+    lines.append('')
+
+    if lv['critical_errors']:
+        lines.append('<b>Date liturgice lipsa:</b>')
+        for err in lv['critical_errors']:
+            lines.append(f'⚠️ {err}')
+        if lv['warnings']:
+            lines.append('')
+            for w in lv['warnings']:
+                lines.append(f'⚠️ {w}')
+        lines.append('')
+        url_dox = zi_data.get('sources', {}).get('doxologia', 'https://doxologia.ro')
+        lines.append(f'Sursa incercata: {url_dox}')
+        return '\n'.join(lines)
+
     if titlu_wp:
         lines.append(f'<b>{titlu_wp}</b>')
     lines.append('')
@@ -1028,13 +1171,12 @@ def build_telegram_preview(zi_data, titlu_wp=''):
         icon = '✓' if v_ok else '⚠'
         if not v_ok:
             lines.append(f'<b>Verset ({icon}):</b> {v_ref}')
-            lines.append('<i>⚠ Facebook nu va fi publicat fara verset verificat.</i>')
+            lines.append('<i>⚠ Verset neverificat — Facebook va fi blocat la publicare.</i>')
         elif v_url:
             lines.append(f'<b>Verset ({icon}):</b> <a href="{v_url}">{v_ref}</a>')
         else:
             lines.append(f'<b>Verset ({icon}):</b> {v_ref}')
 
-    # 3 variante cuvant de folos
     if variants:
         lines.append('')
         lines.append('<b>💬 Cuvânt de folos — 3 variante:</b>')
@@ -1049,22 +1191,19 @@ def build_telegram_preview(zi_data, titlu_wp=''):
         '📚 Surse: <a href="https://doxologia.ro/calendar-ortodox">Doxologia</a> | '
         '<a href="https://www.bibliaortodoxa.ro">Biblia Ortodoxă</a>'
     )
-    if warnings:
+    if lv['warnings']:
+        lines.append('')
+        lines.append('<b>Atenție:</b>')
+        for w in lv['warnings']:
+            lines.append(f'  ⚠️ {w}')
+    elif warnings:
         lines.append('')
         lines.append('<b>Atenție:</b>')
         for w in warnings:
             lines.append(f'  {w}')
     lines.append('')
-    lines.append('<b>Comenzi:</b>')
-    lines.append('/aproba — WP + Facebook')
-    lines.append('/aproba_fb — doar Facebook')
-    lines.append('/aproba_wp — doar WordPress')
-    lines.append('/adaug [text] — adaugă gând personal')
-    lines.append('/regenereaza_cuvant — regenerează cuvântul de folos')
-    lines.append('/editeaza_fb — editează textul Facebook')
-    lines.append('/editeaza_wp — editează titlul și conținutul WP')
-    lines.append('/regenereaza — articol nou complet')
-    lines.append('/respinge — nu publica azi')
+    lines.append('/aproba — WP + Facebook | /aproba_fb — FB | /aproba_wp — WP')
+    lines.append('/adaug [text] | /regenereaza_cuvant | /regenereaza | /respinge')
     return '\n'.join(lines)
 
 def _get_inline_keyboard_cuvant():
@@ -1081,8 +1220,37 @@ def _get_inline_keyboard_cuvant():
         ]
     }
 
-def _get_inline_keyboard_main():
-    """Keyboard principal de actiuni dupa generare articol."""
+def _get_inline_keyboard_blocked():
+    """Keyboard cand datele liturgice lipsesc (status 🔴)."""
+    return {
+        'inline_keyboard': [
+            [{'text': '🔁 Reîncearcă extragerea', 'callback_data': 'retry_extract'}],
+            [{'text': '✏️ Introdu manual datele',  'callback_data': 'introdu_manual'}],
+            [{'text': '❌ Respinge ziua',           'callback_data': 'respinge_btn'}],
+        ]
+    }
+
+def _get_inline_keyboard_main(lv=None):
+    """Keyboard principal. Daca lv (liturgical_status) e blocked, returneaza keyboard blocat."""
+    if lv and lv.get('status') == 'blocked':
+        return _get_inline_keyboard_blocked()
+    if TELEGRAM_UI_MODE == 'client':
+        return {
+            'inline_keyboard': [
+                [
+                    {'text': '1️⃣ Scurt', 'callback_data': 'alege_scurt'},
+                    {'text': '2️⃣ Duhovnicesc', 'callback_data': 'alege_duhovnicesc'},
+                    {'text': '3️⃣ Catehetic', 'callback_data': 'alege_catehetic'},
+                ],
+                [{'text': '✅ Aprobă Facebook', 'callback_data': 'publica_fb'}],
+                [
+                    {'text': '✏️ Editează textul', 'callback_data': 'editeaza_wp_btn'},
+                    {'text': '🔁 Regenerează', 'callback_data': 'regen_cuvant'},
+                ],
+                [{'text': '❌ Respinge', 'callback_data': 'respinge_btn'}],
+            ]
+        }
+    # mod admin (implicit)
     return {
         'inline_keyboard': [
             [
@@ -1453,7 +1621,6 @@ def trimite_spre_aprobare(articol):
     pending_articol = articol
     _save_pending(articol)
 
-    # Salveaza in istoric
     zi_data = articol.get('zi_data', {})
     _append_to_istoric({
         'data':       articol.get('data_generare', datetime.datetime.now().strftime('%Y-%m-%d')),
@@ -1468,9 +1635,33 @@ def trimite_spre_aprobare(articol):
         'surse':      zi_data.get('sources', {}),
     })
 
+    lv = articol.get('liturgical_status') or validate_liturgical_data(zi_data)
+
+    if lv['status'] == 'blocked':
+        data_str = articol.get('data_generare', 'azi')
+        url_dox  = zi_data.get('sources', {}).get('doxologia', 'https://doxologia.ro')
+        lipsesc  = []
+        if not zi_data.get('saints'):
+            lipsesc.append('⚠️ Sfinții zilei')
+        if not zi_data.get('apostle', {}).get('reference'):
+            lipsesc.append('⚠️ Apostolul zilei')
+        if not zi_data.get('gospel', {}).get('reference'):
+            lipsesc.append('⚠️ Evanghelia zilei')
+        if not zi_data.get('selected_verse', {}).get('verified') and REQUIRE_VERIFIED_VERSE:
+            lipsesc.append('⚠️ Versetul biblic verificat')
+        msg = (
+            f"<b>{lv['status_label']}</b>\n\n"
+            f"Nu am putut extrage corect datele liturgice pentru {data_str}.\n\n"
+            f"<b>Lipsesc:</b>\n" + '\n'.join(lipsesc) + "\n\n"
+            f"<b>Sursă încercată:</b>\n{url_dox}\n\n"
+            f"<b>Acțiuni disponibile:</b>"
+        )
+        tg_send(msg, reply_markup=_get_inline_keyboard_blocked())
+        return
+
     if zi_data:
-        preview = build_telegram_preview(zi_data, articol.get('titlu_wp', ''))
-        keyboard = _get_inline_keyboard_main()
+        preview  = build_telegram_preview(zi_data, articol.get('titlu_wp', ''), lv)
+        keyboard = _get_inline_keyboard_main(lv)
     else:
         sfinti_link = ''
         if articol.get('sfinti_list'):
@@ -1482,15 +1673,8 @@ def trimite_spre_aprobare(articol):
             f"{sfinti_link}\n\n"
             f"<b>Preview Facebook:</b>\n"
             f"{str(articol.get('fb_text',''))[:500]}...\n\n"
-            f"<b>Comenzi:</b>\n"
-            f"/aproba — WP + Facebook\n"
-            f"/aproba_fb — doar Facebook\n"
-            f"/aproba_wp — doar WordPress\n"
-            f"/adaug [text] — adaugă gând personal\n"
-            f"/editeaza_fb — editează textul Facebook\n"
-            f"/editeaza_wp — editează titlul și conținutul WP\n"
-            f"/regenereaza — articol nou complet\n"
-            f"/respinge — nu publica azi"
+            f"/aproba — WP + Facebook | /aproba_fb — FB | /aproba_wp — WP\n"
+            f"/adaug | /regenereaza | /respinge"
         )
         keyboard = None
     tg_send(preview, reply_markup=keyboard)
@@ -1677,13 +1861,27 @@ def genereaza_articol_zilnic(extra_text=''):
     # Preia calendarul ortodox complet de pe doxologia.ro
     zi_data = fetch_doxologia_calendar(dt)
 
+    # Valideaza datele esentiale INAINTE de a rula AI
+    lv_pre = validate_liturgical_data(zi_data)
+    if lv_pre['status'] == 'blocked':
+        articol_blocat = {
+            'zi_data': zi_data,
+            'titlu_wp': '',
+            'fb_text': '',
+            'continut_wp': '',
+            'liturgical_status': lv_pre,
+            'data_generare': dt.strftime('%Y-%m-%d'),
+        }
+        trimite_spre_aprobare(articol_blocat)
+        return articol_blocat
+
     sfinti     = zi_data['saints']
     ap_ref     = zi_data['apostle']['reference']
     ev_ref     = zi_data['gospel']['reference']
     apostol    = ap_ref or zi_data['apostle']['text']
     evanghelie = ev_ref or zi_data['gospel']['text']
 
-    # Fallback daca nu s-au gasit lecturi
+    # Fallback DOAR daca lipseste una din lecturi (nu ambele)
     if not apostol or not evanghelie:
         pilda, solomon = scrape_pilde_solomon()
         apostol    = apostol or pilda
@@ -1767,8 +1965,10 @@ def genereaza_articol_zilnic(extra_text=''):
             or generate_pastoral_reflection(zi_data)
         )
 
-        # 3. Validare
+        # 3. Validare liturgica (dupa verificarea versetului)
         zi_data = validate_post_data(zi_data)
+        lv = validate_liturgical_data(zi_data)
+        data['liturgical_status'] = lv
 
         # 4. Construieste FB post structurat
         fb_text_nou = build_facebook_post(zi_data)
@@ -2116,9 +2316,39 @@ def webhook():
                         f'<i>Textul Facebook actualizat.</i>'
                     )
 
+            # ── retry_extract ─────────────────────────────────────────
+            elif cb_data == 'retry_extract':
+                tg_answer_callback(cb_id, 'Reîncerc extragerea...')
+                def _retry_bg():
+                    genereaza_articol_zilnic()
+                threading.Thread(target=_retry_bg, daemon=True).start()
+
+            # ── introdu_manual ────────────────────────────────────────
+            elif cb_data == 'introdu_manual':
+                global _manual_step
+                tg_answer_callback(cb_id, 'Mod introducere manuală')
+                _manual_step = 'sfinti'
+                edit_mode = 'manual'
+                tg_send(
+                    "✏️ <b>Introducere manuală date liturgice</b>\n\n"
+                    "<b>Pasul 1/4 — Sfinții zilei:</b>\n"
+                    "Scrie numele sfinților, separați prin virgulă.\n"
+                    "Exemplu: <i>Sf. Andrei, Sf. Petru</i>\n\n"
+                    "Sau scrie <code>-</code> dacă nu ai această informație."
+                )
+
             # ── Draft WordPress ──────────────────────────────────────
             elif cb_data == 'draft_wp':
-                if not pending_articol:
+                lv_art = (pending_articol or {}).get('liturgical_status', {})
+                if lv_art.get('status') == 'blocked':
+                    tg_answer_callback(cb_id, '❌ Publicare blocată')
+                    erori = lv_art.get('critical_errors', [])
+                    tg_send(
+                        "❌ <b>Publicarea a fost blocată.</b>\n"
+                        "Motiv: datele liturgice lipsesc sau nu au fost verificate.\n\n"
+                        + '\n'.join(f'• {e}' for e in erori)
+                    )
+                elif not pending_articol:
                     tg_answer_callback(cb_id, 'Nu există articol.')
                 else:
                     tg_answer_callback(cb_id, 'Creez draft...')
@@ -2158,7 +2388,16 @@ def webhook():
             # ── Publică direct pe WP ─────────────────────────────────
             elif cb_data == 'publica_wp_direct':
                 art = pending_articol
-                if not art:
+                lv_art = (art or {}).get('liturgical_status', {})
+                if lv_art.get('status') == 'blocked':
+                    tg_answer_callback(cb_id, '❌ Publicare blocată')
+                    erori_lv = lv_art.get('critical_errors', [])
+                    tg_send(
+                        "❌ <b>Publicarea a fost blocată.</b>\n"
+                        "Motiv: datele liturgice lipsesc sau nu au fost verificate.\n\n"
+                        + '\n'.join(f'• {e}' for e in erori_lv)
+                    )
+                elif not art:
                     tg_answer_callback(cb_id, 'Nu există articol.')
                 else:
                     ok_val, erori = validate_wordpress_ready(art)
@@ -2239,7 +2478,16 @@ def webhook():
             # ── Publică pe Facebook ──────────────────────────────────
             elif cb_data == 'publica_fb':
                 art = pending_articol
-                if not art:
+                lv_art = (art or {}).get('liturgical_status', {})
+                if lv_art.get('status') == 'blocked':
+                    tg_answer_callback(cb_id, '❌ Publicare blocată')
+                    erori_lv = lv_art.get('critical_errors', [])
+                    tg_send(
+                        "❌ <b>Publicarea a fost blocată.</b>\n"
+                        "Motiv: datele liturgice lipsesc sau nu au fost verificate.\n\n"
+                        + '\n'.join(f'• {e}' for e in erori_lv)
+                    )
+                elif not art:
                     tg_answer_callback(cb_id, 'Nu există articol.')
                 else:
                     verse_ok = art.get('zi_data', {}).get('selected_verse', {}).get('verified', True)
@@ -2850,6 +3098,88 @@ def webhook():
                 pending_articol['continut_wp'] = ''.join(f'<p>{p.strip()}</p>' for p in paragraphs if p.strip())
             edit_mode = None
             tg_send("✓ Articol WordPress actualizat!", reply_markup=_get_inline_keyboard_main())
+        elif edit_mode == 'manual':
+            global _manual_step
+            step = _manual_step
+            val = text.strip()
+            blank = (val == '-' or val == '')
+            art = pending_articol or {}
+            zi_d = art.get('zi_data') or {}
+            if not zi_d:
+                zi_d = new_zi_data(get_azi())
+            zi_d['manual_input'] = True
+
+            if step == 'sfinti':
+                if not blank:
+                    zi_d['saints'] = [n.strip() for n in val.split(',') if n.strip()]
+                _manual_step = 'apostol'
+                tg_send(
+                    "✅ Sfinți salvați.\n\n"
+                    "<b>Pasul 2/4 — Apostolul zilei:</b>\n"
+                    "Scrie referința Apostolului (ex: <i>Fapte 2, 1-11</i>).\n"
+                    "Sau <code>-</code> dacă nu ai."
+                )
+            elif step == 'apostol':
+                if not blank:
+                    zi_d['apostle'] = {'reference': val, 'text': ''}
+                _manual_step = 'evanghelie'
+                tg_send(
+                    "✅ Apostol salvat.\n\n"
+                    "<b>Pasul 3/4 — Evanghelia zilei:</b>\n"
+                    "Scrie referința Evangheliei (ex: <i>Ioan 1, 1-17</i>).\n"
+                    "Sau <code>-</code> dacă nu ai."
+                )
+            elif step == 'evanghelie':
+                if not blank:
+                    zi_d['gospel'] = {'reference': val, 'text': ''}
+                _manual_step = 'verset'
+                tg_send(
+                    "✅ Evanghelie salvată.\n\n"
+                    "<b>Pasul 4/4 — Verset biblic (opțional):</b>\n"
+                    "Scrie un verset (ex: <i>Ioan 3:16 — Căci Dumnezeu...</i>).\n"
+                    "Sau <code>-</code> pentru a sări."
+                )
+            elif step == 'verset':
+                if not blank:
+                    zi_d['selected_verse'] = {'reference': '', 'text': val, 'verified': False, 'source_url': ''}
+                _manual_step = None
+                edit_mode = None
+                pending_articol['zi_data'] = zi_d
+                _save_pending(pending_articol)
+                lv = validate_liturgical_data(zi_d)
+                pending_articol['liturgical_status'] = lv
+                _save_pending(pending_articol)
+                tg_send("✅ Date introduse manual. Regenerez articolul... (10-20 sec)")
+                def _regen_manual():
+                    global pending_articol
+                    try:
+                        zi_data2 = pending_articol.get('zi_data', {})
+                        ap_ref = zi_data2.get('apostle', {}).get('reference', '')
+                        ev_ref = zi_data2.get('gospel', {}).get('reference', '')
+                        if ap_ref or ev_ref:
+                            zi_data2['selected_verse'] = fetch_biblia_ortodoxa_verse(ev_ref or ap_ref)
+                        zi_data2['pastoral_variants'] = generate_pastoral_variants(zi_data2)
+                        zi_data2['pastoral_reflection'] = (
+                            zi_data2['pastoral_variants'].get('scurt')
+                            or zi_data2['pastoral_variants'].get('duhovnicesc')
+                            or generate_pastoral_reflection(zi_data2)
+                        )
+                        zi_data2 = validate_post_data(zi_data2)
+                        lv2 = validate_liturgical_data(zi_data2)
+                        pending_articol['zi_data'] = zi_data2
+                        pending_articol['liturgical_status'] = lv2
+                        fb_new = build_facebook_post(zi_data2, pending_articol.get('wp_link', ''))
+                        if fb_new:
+                            pending_articol['fb_text'] = fb_new
+                        _save_pending(pending_articol)
+                        preview = build_telegram_preview(zi_data2, pending_articol.get('titlu_wp', ''), lv2)
+                        tg_send(preview, reply_markup=_get_inline_keyboard_main(lv2))
+                    except Exception as e:
+                        tg_send(f"Eroare regenerare manuală: {str(e)}")
+                threading.Thread(target=_regen_manual, daemon=True).start()
+            else:
+                _manual_step = None
+                edit_mode = None
         elif edit_mode == 'scrie':
             edit_mode = None
             tg_send("✍️ Am primit textul. Pregătesc articolul manual... (10-20 sec)")
@@ -3068,7 +3398,23 @@ def ep_test():
     verse_link = (f'<a href="{verse_url}" target="_blank" style="color:#8B0000;">'
                   f'{verse_ref}</a>') if verse_url else verse_ref
 
-    # 4. WordPress API
+    # 4. Status liturgic + debug Doxologia
+    zi_data_for_lv = zi_data.copy()
+    zi_data_for_lv['selected_verse'] = verse if verse else zi_data.get('selected_verse', {'verified': False})
+    lv = validate_liturgical_data(zi_data_for_lv)
+    lv_color = {'ready': '#2e7d32', 'manual_review': '#e65100', 'blocked': '#c62828'}[lv['status']]
+    lv_critical_html = ''.join(f'<li style="color:#c62828;">{e}</li>' for e in lv['critical_errors']) or '<li style="color:#999;font-style:italic;">niciuna</li>'
+    lv_warnings_html = ''.join(f'<li style="color:#e65100;">{w}</li>' for w in lv['warnings']) or '<li style="color:#999;font-style:italic;">niciuna</li>'
+    dox_debug_html = ''
+    if zi_data.get('doxologia_debug'):
+        items = ''.join(f'<li style="font-size:12px;color:#555;">{d}</li>' for d in zi_data['doxologia_debug'])
+        dox_debug_html = (
+            f'<details style="margin-top:8px;"><summary style="font-size:12px;color:#888;cursor:pointer;">'
+            f'Debug Doxologia (selectori incercati)</summary>'
+            f'<ul style="margin:6px 0 0;padding-left:18px;">{items}</ul></details>'
+        )
+
+    # 5. WordPress API
     wp_status = test_wordpress()
     wp_rows = (
         row('URL WordPress', WP_URL, bool(WP_URL))
@@ -3182,7 +3528,27 @@ def ep_test():
 {warnings_html}
 
 <h3 style="color:#8B0000;font-size:14px;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px;">
-  4. WordPress API
+  4. Status Liturgic
+</h3>
+<div style="background:#fff;border-radius:8px;box-shadow:0 1px 6px rgba(0,0,0,.07);margin-bottom:20px;overflow:hidden;padding:14px 16px;">
+  <div style="font-size:18px;font-weight:bold;color:{lv_color};margin-bottom:10px;">{lv['status_label']}</div>
+  <table style="width:100%;border-collapse:collapse;">
+    {row('Sfinți găsiți', str(len(zi_data.get('saints', []))), bool(zi_data.get('saints')))}
+    {row('Apostol', 'DA' if zi_data.get('apostle', {}).get('reference') else 'NU', bool(zi_data.get('apostle', {}).get('reference')))}
+    {row('Evanghelie', 'DA' if zi_data.get('gospel', {}).get('reference') else 'NU', bool(zi_data.get('gospel', {}).get('reference')))}
+    {row('Verset verificat', 'DA' if verse_ok else 'NU', verse_ok)}
+  </table>
+  <div style="margin-top:10px;">
+    <b style="font-size:12px;color:#c62828;">Erori critice:</b>
+    <ul style="margin:4px 0 8px;padding-left:18px;">{lv_critical_html}</ul>
+    <b style="font-size:12px;color:#e65100;">Avertismente:</b>
+    <ul style="margin:4px 0 0;padding-left:18px;">{lv_warnings_html}</ul>
+  </div>
+  {dox_debug_html}
+</div>
+
+<h3 style="color:#8B0000;font-size:14px;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px;">
+  5. WordPress API
 </h3>
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:8px;
   box-shadow:0 1px 6px rgba(0,0,0,.07);margin-bottom:20px;overflow:hidden;">
@@ -3190,7 +3556,7 @@ def ep_test():
 </table>
 
 <h3 style="color:#8B0000;font-size:14px;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px;">
-  5. Scheduler &amp; Keepalive
+  6. Scheduler &amp; Keepalive
 </h3>
 <table style="width:100%;border-collapse:collapse;background:#fff;border-radius:8px;
   box-shadow:0 1px 6px rgba(0,0,0,.07);margin-bottom:20px;overflow:hidden;">
