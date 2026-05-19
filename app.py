@@ -1200,7 +1200,9 @@ def build_facebook_post(zi_data, wp_link=''):
     saints    = zi_data.get('saints', [])
     saints_names = _saint_names(saints)
     ap_ref    = zi_data['apostle'].get('reference', '')
+    ap_text   = zi_data['apostle'].get('text', '')
     ev_ref    = zi_data['gospel'].get('reference', '')
+    ev_text   = zi_data['gospel'].get('text', '')
     v_ref     = zi_data['selected_verse'].get('reference', '')
     v_text    = zi_data['selected_verse'].get('text', '')
     reflection = zi_data.get('pastoral_reflection', '')
@@ -1209,9 +1211,15 @@ def build_facebook_post(zi_data, wp_link=''):
     if saints_names:
         parts.append(f"🕊️ Sfinții zilei\nAstăzi îi pomenim pe: {', '.join(saints_names)}.")
     if ap_ref:
-        parts.append(f"📖 Apostolul zilei\n{ap_ref}")
+        bloc_ap = f"📖 Apostolul zilei\n{ap_ref}"
+        if ap_text:
+            bloc_ap += f"\n\n{ap_text[:700]}"
+        parts.append(bloc_ap)
     if ev_ref:
-        parts.append(f"✝️ Evanghelia zilei\n{ev_ref}")
+        bloc_ev = f"✝️ Evanghelia zilei\n{ev_ref}"
+        if ev_text:
+            bloc_ev += f"\n\n{ev_text[:700]}"
+        parts.append(bloc_ev)
     if v_text and v_ref:
         parts.append(f'„{v_text}"\n({v_ref})')
     if reflection:
