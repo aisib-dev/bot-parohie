@@ -1230,7 +1230,7 @@ def build_facebook_post(zi_data, wp_link=''):
         parts.append(f'„{v_text}"\n({v_ref})')
     if reflection:
         parts.append(f"Cuvânt de folos:\n{reflection}")
-    parts.append("🙏 Doamne, ajută-ne să întâmpinăm ziua cu pace, credință și inimă bună.")
+    parts.append("🙏 Doamne, ajută-ne să trecem ziua cu pace, credință și cu trăire în dragoste față de Tine și față de cei din jurul nostru.")
     if wp_link:
         parts.append(f"Citiți pe site viețile sfinților și pericopele zilei:\n{wp_link}")
     parts.append("#ParohiaCetate2 #CalendarOrtodox #SfintiiZilei #EvangheliaZilei")
@@ -2108,8 +2108,7 @@ def genereaza_articol_zilnic(extra_text=''):
         # 4. Construieste FB post structurat
         fb_text_nou = build_facebook_post(zi_data)
         if fb_text_nou:
-            # Adauga citat familie la final
-            data['fb_text'] = fb_text_nou + f'\n\n✦ {autor_f2}:\n„{citat_f2}"'
+            data['fb_text'] = fb_text_nou + f'\n\n✦ {an_om}\n{autor_f2}:\n„{citat_f2}"'
         # Altfel pastreaza fb_text generat de AI
 
         # 5. Salveaza zi_data si metadata in articol
