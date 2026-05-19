@@ -1502,6 +1502,18 @@ def test_facebook_token():
             lines.append(f"❌ Postare eșuată (#{code}): {msg}")
             if code in (190, 102):
                 lines.append("\n→ Token expirat sau invalid. Regenerează din Graph API Explorer → /me/accounts.")
+            elif code == 283:
+                lines.append(
+                    "\n→ <b>Token lipsit de permisiuni esențiale.</b>\n"
+                    "Soluție pas cu pas:\n"
+                    "1. graph.facebook.com/tools/explorer\n"
+                    "2. Click <b>Generate Access Token</b>\n"
+                    "3. Bifează: <code>pages_show_list</code> + <code>pages_manage_posts</code> + <code>pages_read_engagement</code>\n"
+                    "4. Generează tokenul, aprobă pe Facebook\n"
+                    "5. Cheamă GET <code>/me/accounts</code>\n"
+                    "6. Copiază <code>access_token</code> pentru pagina ta\n"
+                    "7. Pune-l în Render → <b>FB_PAGE_TOKEN</b> → Save → Redeploy"
+                )
             elif code == 10:
                 lines.append("\n→ Token de tip User, nu Page. Mergi la Graph API Explorer → /me/accounts → copiază access_token-ul paginii.")
             elif code == 200:
