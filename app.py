@@ -31,7 +31,8 @@ client = OpenAI(api_key=GROQ_KEY, base_url="https://api.groq.com/openai/v1")
 edit_mode = None  # 'fb', 'wp', 'scrie', 'manual'
 _manual_step = None  # 'sfinti', 'apostol', 'evanghelie', 'verset'
 
-PENDING_FILE = '/tmp/pending_articol.json'
+PENDING_FILE   = '/tmp/pending_articol.json'
+FB_STATS_FILE  = '/tmp/fb_stats_pending.json'
 
 def _load_pending():
     try:
@@ -54,6 +55,62 @@ def _clear_pending():
         os.remove(PENDING_FILE)
     except:
         pass
+
+def _save_fb_stats_pending(fb_post_id, titlu=''):
+    try:
+        data = {
+            'fb_post_id': fb_post_id,
+            'titlu': titlu,
+            'publish_ts': __import__('time').time(),
+        }
+        with open(FB_STATS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False)
+    except:
+        pass
+
+def _check_and_send_fb_stats():
+    """Verifica daca au trecut 24h de la publicare si trimite statisticile."""
+    try:
+        with open(FB_STATS_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except:
+        return
+    import time
+    elapsed = time.time() - data.get('publish_ts', 0)
+    if elapsed < 82800:  # < 23 ore — mai asteptam
+        return
+    fb_post_id = data.get('fb_post_id', '')
+    titlu      = data.get('titlu', 'articolul')
+    if not fb_post_id or not FB_PAGE_TOKEN:
+        os.remove(FB_STATS_FILE) if os.path.exists(FB_STATS_FILE) else None
+        return
+    try:
+        r = requests.get(
+            f"https://graph.facebook.com/v20.0/{fb_post_id}/insights",
+            params={
+                'metric': 'post_impressions,post_reactions_by_type_total,post_clicks',
+                'access_token': FB_PAGE_TOKEN,
+            },
+            timeout=15,
+        )
+        res = r.json()
+        metrics = {m['name']: m.get('values', [{}])[-1].get('value', 0)
+                   for m in res.get('data', [])}
+        impressions = metrics.get('post_impressions', '—')
+        clicks      = metrics.get('post_clicks', '—')
+        reactions   = metrics.get('post_reactions_by_type_total', {})
+        rea_str = ', '.join(f"{k}: {v}" for k, v in reactions.items()) if reactions else '—'
+        ore = round(elapsed / 3600)
+        tg_send(
+            f"📊 <b>Statistici Facebook ({ore}h de la publicare)</b>\n\n"
+            f"<b>Postare:</b> {titlu[:60]}\n\n"
+            f"👁 <b>Afișări:</b> {impressions}\n"
+            f"👆 <b>Click-uri:</b> {clicks}\n"
+            f"❤️ <b>Reacții:</b> {rea_str}"
+        )
+        os.remove(FB_STATS_FILE)
+    except Exception as e:
+        pass  # nu sterge fisierul — va incerca din nou la urmatorul keepalive
 
 pending_articol = _load_pending()
 
@@ -1373,7 +1430,10 @@ def _get_inline_keyboard_main(lv=None):
                 {'text': '🔁 Regen cuvânt', 'callback_data': 'regen_cuvant'},
             ],
             [
+                {'text': '👁 Preview Facebook', 'callback_data': 'preview_fb'},
                 {'text': '✅ Publică pe Facebook', 'callback_data': 'publica_fb'},
+            ],
+            [
                 {'text': '🌐 Draft WordPress', 'callback_data': 'draft_wp'},
             ],
             [
@@ -1405,6 +1465,7 @@ def _get_inline_keyboard_draft():
                 {'text': '🗑️ Șterge draftul', 'callback_data': 'sterge_draft'},
             ],
             [
+                {'text': '👁 Preview Facebook', 'callback_data': 'preview_fb'},
                 {'text': '✅ FB cu link articol', 'callback_data': 'publica_fb'},
             ],
         ]
@@ -1415,6 +1476,7 @@ def _get_inline_keyboard_post_wp():
     return {
         'inline_keyboard': [
             [
+                {'text': '👁 Preview Facebook', 'callback_data': 'preview_fb'},
                 {'text': '✅ Publică pe Facebook cu link WP', 'callback_data': 'publica_fb'},
             ],
         ]
@@ -2655,6 +2717,24 @@ def webhook():
                             tg_send(f"❌ Eroare: {str(e)}")
                     threading.Thread(target=_publica_draft_bg, daemon=True).start()
 
+            # ── Preview Facebook ─────────────────────────────────────
+            elif cb_data == 'preview_fb':
+                art = pending_articol
+                if not art:
+                    tg_answer_callback(cb_id, 'Nu există articol.')
+                else:
+                    tg_answer_callback(cb_id, '')
+                    fb_text = art.get('fb_text', '')
+                    wp_link = art.get('wp_link', '')
+                    if wp_link and wp_link not in fb_text:
+                        fb_text = fb_text + f'\n\nCitiți pe site viețile sfinților și pericopele zilei:\n{wp_link}'
+                    caractere = len(fb_text)
+                    tg_send(
+                        f"👁 <b>Preview Facebook ({caractere} caractere)</b>\n\n"
+                        + fb_text[:3500]
+                        + (f"\n\n<i>... (trunchiat, total {caractere} caractere)</i>" if caractere > 3500 else "")
+                    )
+
             # ── Publică pe Facebook ──────────────────────────────────
             elif cb_data == 'publica_fb':
                 art = pending_articol
@@ -2690,7 +2770,8 @@ def webhook():
                                 if fb_id:
                                     art_date = art.get('data_generare', datetime.datetime.now().strftime('%Y-%m-%d'))
                                     _update_istoric_status(art_date, 'publicat_fb')
-                                    tg_send("✅ <b>Publicat pe Facebook!</b>")
+                                    _save_fb_stats_pending(fb_id, art.get('titlu_wp', ''))
+                                    tg_send("✅ <b>Publicat pe Facebook!</b>\n<i>Statisticile postării vor fi trimise automat după 24h.</i>")
                                 else:
                                     tg_send(f"⚠ Eroare Facebook: {fb_err}")
                             except Exception as e:
@@ -3819,12 +3900,18 @@ def _scheduler_thread():
         _time.sleep(60)
 
 def _keepalive_thread():
-    """Self-ping la fiecare 10 min ca sa nu adoarma Render.com free tier."""
+    """Self-ping la fiecare 10 min ca sa nu adoarma Render.com free tier.
+    Verifica si statisticile Facebook dupa 24h de la publicare.
+    """
     import time
     time.sleep(30)  # asteapta pornirea completa a aplicatiei
     while True:
         try:
             requests.get(f"{APP_URL}/ping", timeout=10)
+        except Exception:
+            pass
+        try:
+            _check_and_send_fb_stats()
         except Exception:
             pass
         time.sleep(590)  # ~10 minute
