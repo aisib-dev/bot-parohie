@@ -1297,31 +1297,51 @@ def test_wordpress():
     return result
 
 def test_facebook_token():
-    """Verifica token-ul Facebook: validitate si test postare directa."""
+    """Verifica token-ul Facebook prin test postare reala (scriere, nu citire)."""
     if not FB_PAGE_TOKEN:
         return "❌ <b>FB_PAGE_TOKEN</b> lipsește din variabilele de mediu Render."
     if not FB_PAGE_ID:
         return "❌ <b>FB_PAGE_ID</b> lipsește din variabilele de mediu Render."
     lines = ["<b>🔍 Diagnostic token Facebook</b>\n"]
+    lines.append("Încerc un post de test (se șterge automat)...")
     try:
-        r = requests.get("https://graph.facebook.com/v20.0/me",
-            params={'access_token': FB_PAGE_TOKEN, 'fields': 'id,name,category'}, timeout=10)
-        me = r.json()
-        if 'error' in me:
-            code = me['error'].get('code', '?')
-            msg  = me['error'].get('message', '')
-            lines.append(f"❌ Token invalid (#{code}): {msg}")
-            lines.append("\n<b>Soluție:</b>\n1. Graph API Explorer → GET /me/accounts → copiază access_token al paginii\n2. Pune-l în Render → FB_PAGE_TOKEN → Save, rebuild, and deploy")
-            return '\n'.join(lines)
-        tip = me.get('category', 'Page')
-        lines.append(f"✅ Token valid — <b>{me.get('name','?')}</b> ({tip})")
-        lines.append(f"   ID token: {me.get('id','?')} | ID pagina setat: {FB_PAGE_ID}")
-        if me.get('id') != FB_PAGE_ID:
-            lines.append("⚠️ ID-ul din token diferă de FB_PAGE_ID — verifică variabila FB_PAGE_ID pe Render!")
+        r = requests.post(
+            f"https://graph.facebook.com/v20.0/{FB_PAGE_ID}/feed",
+            data={
+                'message': '🔧 Test bot parohial — mesaj de test, se șterge automat.',
+                'access_token': FB_PAGE_TOKEN,
+            },
+            timeout=15
+        )
+        res = r.json()
+        if 'id' in res:
+            post_id = res['id']
+            lines.append(f"✅ Post de test creat (ID: {post_id})")
+            try:
+                requests.delete(
+                    f"https://graph.facebook.com/v20.0/{post_id}",
+                    params={'access_token': FB_PAGE_TOKEN},
+                    timeout=10
+                )
+                lines.append("🗑 Post de test șters automat.")
+            except Exception:
+                lines.append("⚠️ Post-ul de test nu s-a putut șterge automat — șterge-l manual din pagina Facebook.")
+            lines.append("\n🎉 <b>Facebook funcționează perfect!</b> Poți folosi butonul ✅ din Telegram.")
+        else:
+            err = res.get('error', {})
+            code = err.get('code', '?')
+            msg  = err.get('message', str(res))
+            lines.append(f"❌ Postare eșuată (#{code}): {msg}")
+            if code in (190, 102):
+                lines.append("\n→ Token expirat sau invalid. Regenerează din Graph API Explorer → /me/accounts.")
+            elif code == 10:
+                lines.append("\n→ Token de tip User, nu Page. Mergi la Graph API Explorer → /me/accounts → copiază access_token-ul paginii.")
+            elif code == 200:
+                lines.append("\n→ Permisiune lipsă. Token-ul nu are drept de postare pe această pagină.")
+            else:
+                lines.append("\n→ Încearcă să obții un token nou din Graph API Explorer → /me/accounts.")
     except Exception as e:
         lines.append(f"❌ Eroare rețea: {str(e)}")
-        return '\n'.join(lines)
-    lines.append("\n🎉 <b>Token Facebook valid!</b> Poți folosi /aproba_fb sau butonul ✅ din Telegram.")
     return '\n'.join(lines)
 
 
