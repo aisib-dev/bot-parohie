@@ -1210,13 +1210,19 @@ def build_facebook_post(zi_data, wp_link=''):
     parts = []
     if saints_names:
         parts.append(f"🕊️ Sfinții zilei\nAstăzi îi pomenim pe: {', '.join(saints_names)}.")
+    ap_url = zi_data['apostle'].get('url', '')
+    ev_url = zi_data['gospel'].get('url', '')
     if ap_ref:
         bloc_ap = f"📖 Apostolul zilei\n{ap_ref}"
+        if ap_url:
+            bloc_ap += f"\n{ap_url}"
         if ap_text:
             bloc_ap += f"\n\n{ap_text[:700]}"
         parts.append(bloc_ap)
     if ev_ref:
         bloc_ev = f"✝️ Evanghelia zilei\n{ev_ref}"
+        if ev_url:
+            bloc_ev += f"\n{ev_url}"
         if ev_text:
             bloc_ev += f"\n\n{ev_text[:700]}"
         parts.append(bloc_ev)
