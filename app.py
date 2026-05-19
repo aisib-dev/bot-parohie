@@ -2269,7 +2269,7 @@ JSON:
 # ============================================================
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    global pending_articol, edit_mode
+    global pending_articol, edit_mode, _manual_step
     update = request.json
     if not update:
         return jsonify({'ok': True})
@@ -2337,7 +2337,6 @@ def webhook():
 
             # ── introdu_manual ────────────────────────────────────────
             elif cb_data == 'introdu_manual':
-                global _manual_step
                 tg_answer_callback(cb_id, 'Mod introducere manuală')
                 _manual_step = 'sfinti'
                 edit_mode = 'manual'
@@ -3111,7 +3110,6 @@ def webhook():
             edit_mode = None
             tg_send("✓ Articol WordPress actualizat!", reply_markup=_get_inline_keyboard_main())
         elif edit_mode == 'manual':
-            global _manual_step
             step = _manual_step
             val = text.strip()
             blank = (val == '-' or val == '')
